@@ -1,4 +1,6 @@
-import { useGetDashboardData, useGetVaultEntries } from '../hooks/useQueries';
+import { useGetDashboardData, useGetVaultEntries } from './hooks/useQueries';
+import { generateSecurePassword } from './lib/crypto';
+import { toast } from 'sonner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -21,12 +23,12 @@ import {
   Zap
 } from 'lucide-react';
 
-export default function SecurityDashboard() {
+export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: string) => void } = {}) {
   const { data: dashboardData, isLoading } = useGetDashboardData();
   const { data: vaultEntries } = useGetVaultEntries();
 
   const securityScore = Number(dashboardData?.securityScore || 0);
-  const secureAccounts = vaultEntries?.filter(e => e.encryptedData.length >= 12).length || 0;
+  const secureAccounts = vaultEntries?.filter(e => (e.password || e.encryptedData || '').length >= 8).length || 0;
   const totalAccounts = vaultEntries?.length || 0;
   const passkeysActive = 1;
   const recommendationsCount = dashboardData?.recommendations?.length || 0;
@@ -128,7 +130,7 @@ export default function SecurityDashboard() {
               <div className="space-y-3">
                 {vaultEntries && vaultEntries.length > 0 ? (
                   vaultEntries.slice(0, 5).map((entry) => {
-                    const score = entry.encryptedData.length >= 12 ? 90 : 60;
+                    const score = (entry.password || entry.encryptedData || '').length >= 8 ? 90 : 60;
                     const status = score >= 80 ? 'secure' : 'warning';
                     return (
                       <IdentityItem
@@ -194,6 +196,43 @@ export default function SecurityDashboard() {
         </Card>
       </div>
 
+      {/* Recent Activity */}
+      {dashboardData?.recentActivity && dashboardData.recentActivity.length > 0 && (
+        <Card className="border-border/40 glass-strong shadow-depth-md card-tactile">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Recent Activity</CardTitle>
+              <Badge variant="secondary" className="text-xs">
+                <Activity className="h-3 w-3 mr-1 animate-pulse" />
+                Live
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {dashboardData.recentActivity.map((event) => (
+                <div key={event.id} className="flex items-start gap-3 p-3 rounded-xl glass-effect border border-border/40 shadow-depth-sm">
+                  <div className="p-2 rounded-lg bg-primary/10 mt-0.5">
+                    <CheckCircle2 className="h-4 w-4 text-success" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="font-medium text-sm">{event.action}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{event.details}</p>
+                    <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                      <span>{event.deviceName}</span>
+                      <span>{event.ipAddress}</span>
+                      <span>{new Date(Number(event.timestamp) / 1_000_000).toLocaleTimeString()}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Quick Actions */}
       <Card className="border-border/40 glass-strong shadow-depth-md card-tactile">
         <CardHeader>
@@ -207,24 +246,33 @@ export default function SecurityDashboard() {
               description="Passwordless login"
               gradient="gradient-success"
               icon={Key}
+              onClick={() => onNavigate ? onNavigate('passkeys') : toast.info('Go to Passkeys tab to create a passkey')}
             />
             <QuickAction
               label="AI Security Scan"
               description="Smart analysis"
               gradient="gradient-primary"
               icon={Sparkles}
+              onClick={() => onNavigate ? onNavigate('threat') : toast.info('Go to Threats tab to run a scan')}
             />
             <QuickAction
               label="Generate Password"
               description="Ultra-secure"
               gradient="from-accent/15 to-accent/5"
               icon={ShieldCheck}
+              onClick={() => {
+                const pw = generateSecurePassword(20, { upper: true, lower: true, digits: true, symbols: true });
+                navigator.clipboard.writeText(pw)
+                  .then(() => toast.success(`Copied secure password (20 chars)`))
+                  .catch(() => toast.info(`Generated: ${pw}`));
+              }}
             />
             <QuickAction
-              label="Family Sharing"
+              label="Team Sharing"
               description="Secure access"
               gradient="gradient-warning"
               icon={Activity}
+              onClick={() => onNavigate ? onNavigate('team') : toast.info('Go to Team tab to manage shared vaults')}
             />
           </div>
         </CardContent>
@@ -329,9 +377,9 @@ function NetworkItem({ label, status, color }: any) {
   );
 }
 
-function QuickAction({ label, description, gradient, icon: Icon }: any) {
+function QuickAction({ label, description, gradient, icon: Icon, onClick }: any) {
   return (
-    <button className={`p-6 rounded-xl ${gradient} border border-border/40 shadow-depth-sm card-tactile text-left btn-press`}>
+    <button onClick={onClick} className={`p-6 rounded-xl ${gradient} border border-border/40 shadow-depth-sm card-tactile text-left btn-press`}>
       <Icon className="h-8 w-8 mb-3" />
       <h4 className="font-semibold mb-1">{label}</h4>
       <p className="text-xs opacity-80">{description}</p>

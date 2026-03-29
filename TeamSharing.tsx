@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useGetTeams, useCreateTeam, useAddTeamMember, useGetSharedVaultEntries, useShareVaultEntry, useGetVaultEntries } from '../hooks/useQueries';
+import { useGetTeams, useCreateTeam, useAddTeamMember, useGetSharedVaultEntries, useShareVaultEntry, useGetVaultEntries } from './hooks/useQueries';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -11,8 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Users, UserPlus, Shield, Clock, Eye, Edit, Crown, Share2, Lock } from 'lucide-react';
 import { toast } from 'sonner';
-import { Principal } from '@icp-sdk/core/principal';
-import type { TeamMember } from '../backend';
+import type { TeamMember } from './backend';
 
 export default function TeamSharing() {
   const { data: teams } = useGetTeams();
@@ -62,11 +61,14 @@ export default function TeamSharing() {
     }
 
     try {
-      const principal = Principal.fromText(memberPrincipal.trim());
+      const principalId = memberPrincipal.trim();
       const member: TeamMember = {
-        principal,
+        principalId,
+        principal: principalId,
+        name: principalId,
+        email: principalId,
         role: memberRole,
-        addedAt: BigInt(Date.now() * 1000000),
+        joinedAt: BigInt(Date.now() * 1000000),
       };
 
       addMember({ teamId: selectedTeam, member }, {

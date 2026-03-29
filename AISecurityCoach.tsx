@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useGetVaultEntries, useAddRecommendation, useGetRecommendations, useGetAIRecommendationsQuery, useAutoApplyFix } from '../hooks/useQueries';
+import { useGetVaultEntries, useAddRecommendation, useGetRecommendations, useGetAIRecommendationsQuery, useAutoApplyFix } from './hooks/useQueries';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -7,7 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Sparkles, AlertTriangle, CheckCircle2, Shield, Activity, Eye, Brain, Info, Loader2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
-import type { SecurityRecommendation, AIContext } from '../backend';
+import type { SecurityRecommendation, AIContext } from './backend';
 
 export default function AISecurityCoach() {
   const { data: vaultEntries, isLoading: vaultLoading } = useGetVaultEntries();
@@ -24,8 +24,8 @@ export default function AISecurityCoach() {
       return;
     }
 
-    const weakPasswords = vaultEntries.filter(e => 
-      e.category === 'password' && e.encryptedData.length < 12
+    const weakPasswords = vaultEntries.filter(e =>
+      e.category === 'password' && (e.password || e.encryptedData || '').length < 12
     ).length;
 
     const oldCredentials = vaultEntries.filter(e => {
@@ -93,23 +93,30 @@ export default function AISecurityCoach() {
       
       // Create a recommendation from AI response
       const recId = `ai-${Date.now()}`;
-      const priority = riskScore >= 80 ? 3 : riskScore >= 50 ? 2 : 1;
-      
+      const priorityStr: 'low' | 'medium' | 'high' | 'critical' = riskScore >= 80 ? 'critical' : riskScore >= 50 ? 'high' : 'medium';
+
       const existingIds = new Set(recommendations?.map(r => r.id) || []);
       if (!existingIds.has(recId)) {
         addRecommendation({
           id: recId,
+          title: 'AI Insight',
+          description: advice,
           message: advice,
-          priority: BigInt(priority),
+          severity: priorityStr,
+          priority: priorityStr,
+          category: 'AI',
+          actionable: false,
+          createdAt: BigInt(Date.now() * 1_000_000),
         });
       }
     }
   }, [aiResponse]);
 
-  const sortedRecommendations = recommendations?.sort((a, b) => Number(b.priority) - Number(a.priority)) || [];
-  const criticalPriority = sortedRecommendations.filter(r => Number(r.priority) >= 3);
-  const highPriority = sortedRecommendations.filter(r => Number(r.priority) === 2);
-  const mediumPriority = sortedRecommendations.filter(r => Number(r.priority) === 1);
+  const PRIORITY_ORDER: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+  const sortedRecommendations = [...(recommendations || [])].sort((a, b) => (PRIORITY_ORDER[b.severity] || 0) - (PRIORITY_ORDER[a.severity] || 0));
+  const criticalPriority = sortedRecommendations.filter(r => r.severity === 'critical' || r.severity === 'high');
+  const highPriority = sortedRecommendations.filter(r => r.severity === 'medium');
+  const mediumPriority = sortedRecommendations.filter(r => r.severity === 'low');
 
   const handleRefresh = () => {
     if (aiContext) {
@@ -291,8 +298,8 @@ function RecommendationCard({ recommendation, priority }: { recommendation: Secu
 
     autoApplyFix(
       {
-        type: actionType,
-        targetId: recommendation.id,
+        entryId: recommendation.id,
+        category: actionType,
       },
       {
         onSuccess: () => {

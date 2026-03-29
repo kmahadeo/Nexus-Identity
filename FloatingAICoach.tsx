@@ -1,14 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Sparkles, X, Send, Info, MessageCircle, Brain, Loader2 } from 'lucide-react';
-import { useGetVaultEntries, useGetRecommendations, useChatWithAI } from '../hooks/useQueries';
+import { Sparkles, X, Send, Loader2, Settings2 } from 'lucide-react';
+import { useGetVaultEntries, useGetRecommendations, useChatWithAI } from './hooks/useQueries';
 import { toast } from 'sonner';
-import type { AIContext } from '../backend';
+import { settings as appSettings } from './lib/storage';
+import type { AIContext } from './backend';
 
 interface Message {
   id: string;
@@ -20,10 +18,12 @@ interface Message {
 
 interface FloatingAICoachProps {
   currentPage?: string;
+  embedded?: boolean;
+  onClose?: () => void;
 }
 
-export default function FloatingAICoach({ currentPage = 'dashboard' }: FloatingAICoachProps) {
-  const [isOpen, setIsOpen] = useState(false);
+export default function FloatingAICoach({ currentPage = 'dashboard', embedded = false, onClose }: FloatingAICoachProps) {
+  const [isOpen, setIsOpen] = useState(embedded);
   const [isActive, setIsActive] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -63,7 +63,7 @@ export default function FloatingAICoach({ currentPage = 'dashboard' }: FloatingA
   // Proactive insights based on vault data
   useEffect(() => {
     if (recommendations && recommendations.length > 0 && messages.length === 1 && isOpen) {
-      const criticalRecs = recommendations.filter(r => Number(r.priority) >= 3);
+      const criticalRecs = recommendations.filter(r => r.severity === 'high' || r.severity === 'critical' || r.priority === 'high' || r.priority === 'critical');
       if (criticalRecs.length > 0) {
         setTimeout(() => {
           setMessages(prev => [...prev, {
@@ -81,25 +81,28 @@ export default function FloatingAICoach({ currentPage = 'dashboard' }: FloatingA
     }
   }, [recommendations, messages.length, isOpen]);
 
+  const hasApiKey = !!appSettings.getAiKey();
+
   const getContextualGreeting = (page: string) => {
+    const aiSource = hasApiKey ? 'Claude (Anthropic)' : 'local security heuristics';
     const greetings: Record<string, string> = {
-      dashboard: "👋 Hi! I'm your AI Security Coach powered by ChatAnywhere API (GPT-4o-ca) via backend AIClient. I analyze your security posture in real-time using contextual learning with embedded context (vault metadata, auth status, device trust). How can I help you today?",
-      passkeys: "🔑 Great choice! Passkeys use FIDO2/WebAuthn standards with FIDO Alliance MDS integration (https://mds.fidoalliance.org/) for device verification and attestation validation. I can help you set up passwordless authentication with biometric enrollment.",
-      vault: "🔐 I'm monitoring your vault with AI-powered analysis via ChatAnywhere API through the backend AIClient. I can help you strengthen passwords, enable MFA, or rotate old credentials using 1Password Connect API integration with secure OAuth2 authentication.",
-      biometric: "👁️ Biometric authentication adds an extra layer of security using platform-native APIs (Face ID, Touch ID, Windows Hello). Let me guide you through the setup process with real WebAuthn/FIDO2 flows.",
-      threat: "🎯 I'm continuously scanning for threats using predictive breach analysis powered by ChatAnywhere API. Ask me about any security concerns you have.",
-      team: "👥 Team security is crucial. I can help you manage permissions, audit access, and ensure compliance with automated workflows through Okta, Entra ID, or Ping Identity integration.",
-      integrations: "🔌 Production SSO integrations enhance security. I can help you connect Okta, Microsoft Entra ID, Ping Identity, Cisco Duo, or HYPR for enterprise authentication with live OAuth2 flows and secure token storage.",
-      developer: "💻 The Developer SDK provides REST and GraphQL APIs with production TypeScript, Swift, and Kotlin SDKs. I can help you integrate Nexus Identity Fabric into your applications with webhook infrastructure and API key management.",
-      admin: "🧠 The AI OS-Layer powered by ChatAnywhere API provides organizational intelligence with automated remediation, compliance monitoring (SOC2, ISO27001, GDPR, HIPAA), and SIEM integration (Splunk, Microsoft Sentinel, 1Password Events API).",
-      federated: "🌐 Nexus Fabric enables federated identity sync across Microsoft Entra ID, Okta, Apple iCloud Keychain, and Web3 DID with verifiable credentials. I can help you set up cross-platform synchronization using production APIs with OAuth2 flows.",
+      dashboard: `Hi! I'm your Nexus AI Security Coach, powered by ${aiSource}. I analyse your vault health, auth events and threat posture in real-time. What can I help you with?`,
+      passkeys:  `Passkeys use FIDO2/WebAuthn — the private key is generated in your device's secure enclave and never leaves it. Authentication is phishing-proof and domain-scoped. Click "Register Passkey" to try it for real.`,
+      vault:     `Your vault uses AES-256-GCM with a PBKDF2-derived key. I can help you audit password strength, detect reuse, or rotate stale credentials. What would you like to review?`,
+      biometric: `Biometric authentication binds a FIDO2 credential to your platform authenticator (Touch ID, Face ID, Windows Hello). The biometric data stays on-device — Nexus never sees it.`,
+      threat:    `I'm scanning your vault and auth events for threats. Run a full scan to get an up-to-date risk breakdown. Ask me about any specific concern.`,
+      team:      `Team security is about least-privilege access and audit trails. I can help you review member permissions, detect over-provisioned accounts, or set up MFA enforcement.`,
+      integrations: `SSO integrations centralize identity management. I can guide you through Okta, Microsoft Entra ID or Ping Identity setup using OAuth2/SAML flows.`,
+      developer: `The Nexus SDK exposes REST and WebSocket APIs for identity fabric integration. Ask me about auth flows, webhook setup or SDK usage.`,
+      admin:     `You have admin access. I can help with compliance monitoring (SOC2, ISO27001, GDPR), SIEM event analysis and automated policy enforcement.`,
+      federated: `Nexus Fabric enables cross-platform identity sync via OpenID Connect and verifiable credentials. Ask me about federation with Entra ID, Okta or Web3 DID.`,
     };
     return greetings[page] || greetings.dashboard;
   };
 
   const handleShowIssues = () => {
-    const criticalRecs = recommendations?.filter(r => Number(r.priority) >= 3) || [];
-    const issuesList = criticalRecs.map((rec, idx) => `${idx + 1}. ${rec.message}`).join('\n');
+    const criticalRecs = recommendations?.filter(r => r.severity === 'high' || r.severity === 'critical' || r.priority === 'high' || r.priority === 'critical') || [];
+    const issuesList = criticalRecs.map((rec, idx) => `${idx + 1}. ${rec.message || rec.description}`).join('\n');
     setMessages(prev => [...prev, {
       id: `issues-${Date.now()}`,
       type: 'ai',
@@ -257,139 +260,122 @@ export default function FloatingAICoach({ currentPage = 'dashboard' }: FloatingA
     };
   };
 
+  // Chat content shared between embedded and floating modes
+  const chatContent = (
+    <>
+      <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: 'rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
+        <div className="p-1.5 rounded-lg" style={{ background: 'rgba(139,92,246,0.15)' }}>
+          <Sparkles className="h-4 w-4 text-violet-400" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-white/80">AI Security Coach</p>
+          <p className="text-[10px] text-white/35 flex items-center gap-1">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
+            {hasApiKey ? 'Claude (Anthropic) · ' : 'Local mode · '}
+            {currentPage}
+          </p>
+        </div>
+        {!hasApiKey && (
+          <button
+            onClick={() => toast.info('Add your Anthropic API key in Settings → AI Coach')}
+            className="h-6 px-2 rounded-full text-[10px] font-mono text-white/40 hover:text-white/70 transition-colors"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
+          >
+            + API key
+          </button>
+        )}
+        {(embedded && onClose) && (
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-white/30 hover:text-white/60" onClick={onClose}>
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+      <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+        <div className="space-y-3">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-[90%] rounded-xl p-3 ${
+                  message.type === 'user'
+                    ? 'bg-primary/80 text-white text-sm'
+                    : 'text-sm text-white/70'
+                }`}
+                style={message.type === 'ai' ? { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' } : {}}
+              >
+                <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                {message.actions && (
+                  <div className="flex gap-2 mt-2">
+                    {message.actions.map((action, idx) => (
+                      <Button key={idx} size="sm" variant="secondary" onClick={action.onClick} className="h-6 text-[10px] rounded-full btn-press">
+                        {action.label}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          {isChatPending && (
+            <div className="flex justify-start">
+              <div className="rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  <span className="text-xs text-white/40">Analyzing...</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+      <div className="p-3 border-t" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+        <div className="flex gap-2">
+          <Input
+            placeholder="Ask about security..."
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
+            className="bg-white/[0.04] border-white/[0.06] text-sm h-9 text-white placeholder:text-white/25"
+            disabled={isChatPending}
+          />
+          <Button
+            onClick={handleSendMessage}
+            size="icon"
+            className="h-9 w-9 rounded-lg bg-primary/80 hover:bg-primary btn-press shrink-0"
+            disabled={isChatPending || !inputValue.trim()}
+          >
+            {isChatPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+
+  // Embedded mode: render directly as a flex column
+  if (embedded) {
+    return <div className="flex flex-col h-full">{chatContent}</div>;
+  }
+
+  // Floating mode
   return (
     <>
-      {/* Floating Orb Button */}
       <div className="fixed bottom-6 right-6 z-50">
         <Button
           onClick={() => setIsOpen(!isOpen)}
-          className={`h-16 w-16 rounded-full bg-gradient-to-br from-primary to-accent shadow-depth-lg hover:shadow-depth-lg hover:scale-110 transition-all duration-300 ${
+          className={`h-14 w-14 rounded-full shadow-depth-lg hover:scale-110 transition-all duration-300 ${
             isActive ? 'animate-pulse glow-primary-soft' : ''
           }`}
-          style={{
-            transform: isOpen ? 'scale(0.9)' : 'scale(1)',
-          }}
+          style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.9), rgba(34,211,238,0.7))' }}
         >
-          {isOpen ? (
-            <X className="h-6 w-6 text-white" />
-          ) : (
-            <Sparkles className="h-6 w-6 text-white" />
-          )}
-          {!isOpen && (
-            <div className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-destructive animate-pulse" />
-          )}
+          {isOpen ? <X className="h-5 w-5 text-white" /> : <Sparkles className="h-5 w-5 text-white" />}
         </Button>
       </div>
 
-      {/* Chat Panel */}
       {isOpen && (
-        <div className="fixed bottom-24 right-6 z-50 w-96 animate-scale-in">
-          <Card className="border-border/40 glass-strong shadow-depth-lg overflow-hidden">
-            <CardHeader className="border-b border-border/40 bg-gradient-to-br from-primary/10 to-accent/5">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-xl bg-gradient-to-br from-primary/20 to-accent/10 shadow-depth-sm">
-                  <Sparkles className="h-5 w-5 text-primary" />
-                </div>
-                <div className="flex-1">
-                  <CardTitle className="text-lg">AI Security Coach</CardTitle>
-                  <CardDescription className="text-xs flex items-center gap-1">
-                    <div className="h-2 w-2 rounded-full bg-success animate-pulse" />
-                    ChatAnywhere API • Active on {currentPage}
-                  </CardDescription>
-                </div>
-                <Badge variant="secondary" className="text-xs">
-                  <Brain className="h-3 w-3 mr-1" />
-                  Live
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              <ScrollArea className="h-96 p-4" ref={scrollRef}>
-                <div className="space-y-4">
-                  {/* Integration Status */}
-                  <Alert className="border-primary/40 bg-primary/5">
-                    <Info className="h-4 w-4 text-primary" />
-                    <AlertDescription className="text-xs">
-                      Connected to ChatAnywhere API (GPT-4o-ca) via backend AIClient. Real-time context-aware security insights with auto-apply functionality.
-                    </AlertDescription>
-                  </Alert>
-
-                  {messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
-                    >
-                      <div
-                        className={`max-w-[85%] rounded-2xl p-3 ${
-                          message.type === 'user'
-                            ? 'bg-primary text-primary-foreground shadow-depth-sm'
-                            : 'glass-effect border border-border/40 shadow-depth-sm'
-                        }`}
-                      >
-                        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                        {message.actions && (
-                          <div className="flex gap-2 mt-3">
-                            {message.actions.map((action, idx) => (
-                              <Button
-                                key={idx}
-                                size="sm"
-                                variant="secondary"
-                                onClick={action.onClick}
-                                className="h-7 text-xs rounded-full btn-press"
-                              >
-                                {action.label}
-                              </Button>
-                            ))}
-                          </div>
-                        )}
-                        <p className="text-xs opacity-60 mt-2">
-                          {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-
-                  {isChatPending && (
-                    <div className="flex justify-start">
-                      <div className="glass-effect border border-border/40 shadow-depth-sm rounded-2xl p-3">
-                        <div className="flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                          <span className="text-sm text-muted-foreground">AI is thinking...</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </ScrollArea>
-              <div className="p-4 border-t border-border/40 glass-effect">
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Ask me anything..."
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
-                    className="glass-effect"
-                    disabled={isChatPending}
-                  />
-                  <Button
-                    onClick={handleSendMessage}
-                    size="icon"
-                    className="rounded-full bg-primary hover:bg-primary/90 btn-press"
-                    disabled={isChatPending || !inputValue.trim()}
-                  >
-                    {isChatPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Send className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground mt-2 text-center">
-                  Context-aware • Powered by ChatAnywhere API • Real-time insights
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="fixed bottom-24 right-6 z-50 w-[360px] h-[480px] animate-scale-in aurora-panel-strong rounded-xl overflow-hidden flex flex-col shadow-depth-lg" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+          {chatContent}
         </div>
       )}
     </>

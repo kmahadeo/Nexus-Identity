@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useGetVaultEntries, useAddVaultEntry, useDeleteVaultEntry, useLogActivity } from '../hooks/useQueries';
+import { useGetVaultEntries, useAddVaultEntry, useDeleteVaultEntry, useLogActivity } from './hooks/useQueries';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -11,9 +11,10 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Plus, Lock, Key, CreditCard, FileText, Trash2, Eye, EyeOff, Shield, AlertTriangle, CheckCircle2, RefreshCw, Smartphone, Cloud, Sparkles } from 'lucide-react';
+import { Plus, Lock, Key, CreditCard, FileText, Trash2, Eye, EyeOff, Shield, AlertTriangle, CheckCircle2, RefreshCw, Smartphone, Cloud, Sparkles, Copy, Wand2, Globe, User } from 'lucide-react';
+import { generateSecurePassword } from './lib/crypto';
 import { toast } from 'sonner';
-import type { VaultEntry } from '../backend';
+import type { VaultEntry } from './backend';
 
 const CATEGORIES = [
   { value: 'password', label: 'Password', icon: Lock },
@@ -33,25 +34,35 @@ export default function VaultView() {
   const [entryToDelete, setEntryToDelete] = useState<string | null>(null);
   const [viewingEntry, setViewingEntry] = useState<string | null>(null);
 
+  const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
+    username: '',
+    password: '',
+    url: '',
+    notes: '',
     category: 'password',
-    encryptedData: '',
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name.trim() || !formData.encryptedData.trim()) {
-      toast.error('Please fill in all fields');
+    if (!formData.name.trim()) {
+      toast.error('Entry name is required');
       return;
     }
 
     const entry: VaultEntry = {
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       name: formData.name.trim(),
+      title: formData.name.trim(),
+      username: formData.username.trim(),
+      password: formData.password.trim(),
+      url: formData.url.trim(),
+      notes: formData.notes.trim(),
+      tags: [],
       category: formData.category,
-      encryptedData: formData.encryptedData.trim(),
+      encryptedData: formData.password.trim() || formData.notes.trim(),
       createdAt: BigInt(Date.now() * 1000000),
       updatedAt: BigInt(Date.now() * 1000000),
     };
@@ -60,7 +71,8 @@ export default function VaultView() {
       onSuccess: () => {
         toast.success('Vault entry added successfully');
         logActivity({ action: 'vault_add', details: `Added ${formData.category}: ${formData.name}` });
-        setFormData({ name: '', category: 'password', encryptedData: '' });
+        setFormData({ name: '', username: '', password: '', url: '', notes: '', category: 'password' });
+        setShowPassword(false);
         setIsDialogOpen(false);
       },
       onError: () => {
@@ -121,7 +133,8 @@ export default function VaultView() {
 
   const getEncryptionStrength = (entry: VaultEntry) => {
     const daysSinceCreation = (Date.now() - Number(entry.createdAt) / 1000000) / (1000 * 60 * 60 * 24);
-    const baseStrength = entry.encryptedData.length >= 12 ? 95 : 75;
+    const secretLen = (entry.password || entry.encryptedData || '').length;
+    const baseStrength = secretLen >= 12 ? 95 : 75;
     const ageReduction = Math.min(daysSinceCreation / 90 * 10, 10);
     return Math.max(baseStrength - ageReduction, 60);
   };
@@ -136,7 +149,7 @@ export default function VaultView() {
   };
 
   const totalEntries = vaultEntries?.length || 0;
-  const secureEntries = vaultEntries?.filter(e => getEncryptionStrength(e) >= 80).length || 0;
+  const secureEntries = vaultEntries?.filter(e => (e.password || e.encryptedData || '').length >= 8).length || 0;
   const needsRotationCount = vaultEntries?.filter(e => needsRotation(e)).length || 0;
 
   return (
@@ -160,60 +173,119 @@ export default function VaultView() {
                 <DialogDescription>Store your credentials securely with AES-256 encryption</DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Entry Name *</Label>
+                    <Input
+                      id="name"
+                      placeholder="e.g., Gmail"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      className="glass-effect"
+                      disabled={isAdding}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="category">Category</Label>
+                    <Select
+                      value={formData.category}
+                      onValueChange={(value) => setFormData({ ...formData, category: value })}
+                      disabled={isAdding}
+                    >
+                      <SelectTrigger className="glass-effect">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CATEGORIES.map((cat) => (
+                          <SelectItem key={cat.value} value={cat.value}>
+                            <div className="flex items-center gap-2">
+                              <cat.icon className="h-4 w-4" />
+                              {cat.label}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
                 <div className="space-y-2">
-                  <Label htmlFor="name">Entry Name</Label>
+                  <Label htmlFor="username">Username / Email</Label>
                   <Input
-                    id="name"
-                    placeholder="e.g., Gmail Account"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    id="username"
+                    placeholder="username@example.com"
+                    value={formData.username}
+                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                     className="glass-effect"
                     disabled={isAdding}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="category">Category</Label>
-                  <Select
-                    value={formData.category}
-                    onValueChange={(value) => setFormData({ ...formData, category: value })}
-                    disabled={isAdding}
-                  >
-                    <SelectTrigger className="glass-effect">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CATEGORIES.map((cat) => (
-                        <SelectItem key={cat.value} value={cat.value}>
-                          <div className="flex items-center gap-2">
-                            <cat.icon className="h-4 w-4" />
-                            {cat.label}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="data">Sensitive Data</Label>
-                  <Textarea
-                    id="data"
-                    placeholder="Enter your password, key, or other sensitive information"
-                    value={formData.encryptedData}
-                    onChange={(e) => setFormData({ ...formData, encryptedData: e.target.value })}
-                    className="glass-effect min-h-24"
-                    disabled={isAdding}
-                  />
-                  {formData.category === 'password' && formData.encryptedData && (
+                  <Label htmlFor="password">Password / Secret</Label>
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Enter password or secret key"
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      className="glass-effect pr-20"
+                      disabled={isAdding}
+                    />
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const pwd = generateSecurePassword(20, { upper: true, lower: true, digits: true, symbols: true });
+                          setFormData(f => ({ ...f, password: pwd }));
+                          setShowPassword(true);
+                        }}
+                        className="text-muted-foreground hover:text-primary transition-colors"
+                        title="Generate secure password"
+                      >
+                        <Wand2 className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(v => !v)}
+                        className="text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  {formData.category === 'password' && formData.password && (
                     <div className="p-3 rounded-lg glass-effect border border-border/40">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-xs text-muted-foreground">Password Strength</span>
-                        <Badge variant="secondary" className={`text-xs ${analyzePasswordStrength(formData.encryptedData).color}`}>
-                          {analyzePasswordStrength(formData.encryptedData).strength}
+                        <Badge variant="secondary" className={`text-xs ${analyzePasswordStrength(formData.password).color}`}>
+                          {analyzePasswordStrength(formData.password).strength}
                         </Badge>
                       </div>
-                      <Progress value={analyzePasswordStrength(formData.encryptedData).score} className="h-2" />
+                      <Progress value={analyzePasswordStrength(formData.password).score} className="h-2" />
                     </div>
                   )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="url">URL (optional)</Label>
+                  <Input
+                    id="url"
+                    placeholder="https://example.com"
+                    value={formData.url}
+                    onChange={(e) => setFormData({ ...formData, url: e.target.value })}
+                    className="glass-effect"
+                    disabled={isAdding}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="notes">Notes (optional)</Label>
+                  <Textarea
+                    id="notes"
+                    placeholder="Additional notes or context"
+                    value={formData.notes}
+                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                    className="glass-effect min-h-16"
+                    disabled={isAdding}
+                  />
                 </div>
               </div>
               <DialogFooter>
@@ -305,7 +377,8 @@ export default function VaultView() {
                 {vaultEntries.map((entry) => {
                   const Icon = getCategoryIcon(entry.category);
                   const isViewing = viewingEntry === entry.id;
-                  const strength = entry.category === 'password' ? analyzePasswordStrength(entry.encryptedData) : null;
+                  const secretVal = entry.password || entry.encryptedData || '';
+                  const strength = entry.category === 'password' ? analyzePasswordStrength(secretVal) : null;
                   const encryptionStrength = getEncryptionStrength(entry);
                   const needsRot = needsRotation(entry);
                   const mfaIssue = hasMFAIssue(entry);
@@ -392,8 +465,70 @@ export default function VaultView() {
                                 </Button>
                               </div>
                               {isViewing && (
-                                <div className="p-4 rounded-lg glass-strong border border-border/40 backdrop-blur-xl">
-                                  <p className="text-sm font-mono break-all">{entry.encryptedData}</p>
+                                <div className="p-4 rounded-lg glass-strong border border-border/40 backdrop-blur-xl space-y-3">
+                                  {entry.username && (
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <span className="text-xs text-muted-foreground flex items-center gap-1"><User className="h-3 w-3" />Username</span>
+                                        <p className="text-sm font-mono truncate">{entry.username}</p>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(entry.username);
+                                          toast.success('Username copied');
+                                        }}
+                                        className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+                                        title="Copy username"
+                                      >
+                                        <Copy className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+                                  {secretVal && (
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <span className="text-xs text-muted-foreground flex items-center gap-1"><Key className="h-3 w-3" />Password / Secret</span>
+                                        <p className="text-sm font-mono break-all">{secretVal}</p>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(secretVal);
+                                          toast.success('Password copied');
+                                        }}
+                                        className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+                                        title="Copy password"
+                                      >
+                                        <Copy className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+                                  {entry.url && (
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <span className="text-xs text-muted-foreground flex items-center gap-1"><Globe className="h-3 w-3" />URL</span>
+                                        <p className="text-sm font-mono text-primary truncate">{entry.url}</p>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(entry.url!);
+                                          toast.success('URL copied');
+                                        }}
+                                        className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+                                        title="Copy URL"
+                                      >
+                                        <Copy className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+                                  {entry.notes && (
+                                    <div>
+                                      <span className="text-xs text-muted-foreground">Notes</span>
+                                      <p className="text-sm mt-0.5">{entry.notes}</p>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>

@@ -1,46 +1,53 @@
 import { useInternetIdentity } from './hooks/useInternetIdentity';
-import { useGetCallerUserProfile } from './hooks/useQueries';
-import { ThemeProvider } from 'next-themes';
 import { Toaster } from '@/components/ui/sonner';
-import LandingPage from './pages/LandingPage';
-import MainApp from './pages/MainApp';
-import ProfileSetup from './components/ProfileSetup';
+import { useTenant } from './TenantContext';
+import NexusLogo from './NexusLogo';
+import LandingPage from './LandingPage';
+import MainApp from './MainApp';
 
 export default function App() {
-  const { identity, isInitializing } = useInternetIdentity();
-  const { data: userProfile, isLoading: profileLoading, isFetched } = useGetCallerUserProfile();
+  const { isInitializing, loginStatus, session } = useInternetIdentity();
+  const { tier } = useTenant();
 
-  const isAuthenticated = !!identity;
-  const showProfileSetup = isAuthenticated && !profileLoading && isFetched && userProfile === null;
+  // Only considered authenticated once role selection is complete
+  const isAuthenticated = loginStatus === 'logged-in';
+  const hasProfile = !!session;
 
-  if (isInitializing || (isAuthenticated && !isFetched)) {
+  if (isInitializing) {
     return (
-      <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
-        <div className="flex h-screen items-center justify-center bg-background">
-          <div className="flex flex-col items-center gap-4">
-            <div className="relative h-16 w-16">
-              <div className="absolute inset-0 animate-spin rounded-full border-4 border-primary/30 border-t-primary" />
-              <div className="absolute inset-2 animate-pulse rounded-full bg-primary/20" />
+      <div
+        className="flex h-screen items-center justify-center"
+        data-tier={tier}
+        style={{ background: 'radial-gradient(ellipse at 50% 40%, rgba(8,8,18,1) 0%, rgba(3,4,7,1) 100%)' }}
+      >
+        <div className="flex flex-col items-center gap-6">
+          <NexusLogo size={64} />
+          <div className="text-center">
+            <p
+              className="text-xs text-white/40 tracking-[0.2em] uppercase"
+              style={{ fontFamily: 'JetBrains Mono, monospace' }}
+            >
+              NEXUS.IDENTITY
+            </p>
+            <div className="mt-3 flex items-center gap-2 justify-center">
+              <div className="h-1 w-1 rounded-full bg-white/30 animate-pulse" />
+              <div className="h-1 w-1 rounded-full bg-white/30 animate-pulse" style={{ animationDelay: '0.2s' }} />
+              <div className="h-1 w-1 rounded-full bg-white/30 animate-pulse" style={{ animationDelay: '0.4s' }} />
             </div>
-            <p className="text-sm text-muted-foreground animate-pulse">Initializing Nexus Identity...</p>
           </div>
         </div>
-      </ThemeProvider>
+      </div>
     );
   }
 
   return (
-    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
-      <div className="min-h-screen bg-background">
-        {showProfileSetup ? (
-          <ProfileSetup />
-        ) : isAuthenticated && userProfile ? (
-          <MainApp />
-        ) : (
-          <LandingPage />
-        )}
-        <Toaster />
-      </div>
-    </ThemeProvider>
+    <div className="min-h-screen bg-background" data-tier={tier}>
+      {isAuthenticated && hasProfile ? (
+        <MainApp />
+      ) : (
+        <LandingPage />
+      )}
+      <Toaster />
+    </div>
   );
 }

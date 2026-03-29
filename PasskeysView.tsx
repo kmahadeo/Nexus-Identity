@@ -1,118 +1,155 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Key, Fingerprint, Shield, CheckCircle2, Smartphone, Laptop, AlertCircle, Zap, Lock, Globe } from 'lucide-react';
+import {
+  Key, Fingerprint, Shield, CheckCircle2, Smartphone, Laptop, AlertCircle,
+  Zap, Lock, Globe, Trash2, RefreshCw, Copy, Clock, Cpu,
+} from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  loadPasskeys, deletePasskey, registerPasskey, authenticatePasskey,
+  isWebAuthnAvailable, isPlatformAuthenticatorAvailable,
+  type StoredPasskey,
+} from './lib/webauthn';
+import { useInternetIdentity } from './hooks/useInternetIdentity';
+import { useGetDashboardData } from './hooks/useQueries';
 
 export default function PasskeysView() {
-  const [isCreating, setIsCreating] = useState(false);
-  const [isAuthenticating, setIsAuthenticating] = useState(false);
-  const [registeredPasskeys, setRegisteredPasskeys] = useState<any[]>([]);
-  const [webAuthnSupported, setWebAuthnSupported] = useState(true);
+  const { session } = useInternetIdentity();
+  const { refetch: refetchDash } = useGetDashboardData();
 
-  // Check WebAuthn support
-  useState(() => {
-    const supported = window.PublicKeyCredential !== undefined;
-    setWebAuthnSupported(supported);
-  });
+  const [passkeys, setPasskeys]           = useState<StoredPasskey[]>([]);
+  const [platformAvail, setPlatformAvail] = useState<boolean | null>(null);
+  const [webAuthnAvail, setWebAuthnAvail] = useState(false);
+  const [isCreating, setIsCreating]       = useState(false);
+  const [isAuthing, setIsAuthing]         = useState(false);
+  const [lastAuthResult, setLastAuthResult] = useState<'success' | 'fail' | null>(null);
 
-  const handleCreatePasskey = async () => {
-    if (!webAuthnSupported) {
-      toast.error('WebAuthn is not supported in this browser');
-      return;
-    }
+  useEffect(() => {
+    setPasskeys(loadPasskeys());
+    setWebAuthnAvail(isWebAuthnAvailable());
+    isPlatformAuthenticatorAvailable().then(setPlatformAvail);
+  }, []);
 
+  const reload = () => setPasskeys(loadPasskeys());
+
+  /* ── Register new passkey ── */
+  const handleCreate = async (attachment: AuthenticatorAttachment = 'platform') => {
+    if (!webAuthnAvail) { toast.error('WebAuthn is not supported in this browser.'); return; }
     setIsCreating(true);
     try {
-      // Simulate WebAuthn registration flow
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      const newPasskey = {
-        id: `passkey-${Date.now()}`,
-        name: `${navigator.platform} - ${new Date().toLocaleDateString()}`,
-        createdAt: Date.now(),
-        lastUsed: Date.now(),
-        type: 'platform',
-        device: navigator.platform,
-      };
-      
-      setRegisteredPasskeys([...registeredPasskeys, newPasskey]);
-      toast.success('Passkey created successfully!');
-    } catch (error) {
-      toast.error('Failed to create passkey');
+      const stored = await registerPasskey(
+        session?.principalId ?? crypto.randomUUID(),
+        session?.email       ?? 'user@nexus.io',
+        session?.name        ?? 'Nexus User',
+        attachment,
+      );
+      reload();
+      refetchDash();
+      toast.success(`Passkey "${stored.name}" registered successfully`);
+    } catch (err: any) {
+      const msg = err?.message ?? 'Passkey creation failed.';
+      if (msg.includes('cancel') || msg.includes('abort')) {
+        toast.info('Passkey creation was cancelled.');
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setIsCreating(false);
     }
   };
 
+  /* ── Authenticate with existing passkey ── */
   const handleAuthenticate = async () => {
-    if (!webAuthnSupported) {
-      toast.error('WebAuthn is not supported in this browser');
-      return;
-    }
-
-    setIsAuthenticating(true);
+    if (!webAuthnAvail) { toast.error('WebAuthn is not supported in this browser.'); return; }
+    if (passkeys.length === 0) { toast.error('No passkeys registered — create one first.'); return; }
+    setIsAuthing(true);
+    setLastAuthResult(null);
     try {
-      // Simulate WebAuthn authentication flow
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      toast.success('Authentication successful!');
-    } catch (error) {
-      toast.error('Authentication failed');
+      const credId = await authenticatePasskey(passkeys.map(k => k.id));
+      reload();
+      setLastAuthResult('success');
+      toast.success('Authentication successful', { description: `Credential: ${credId.slice(0, 12)}…` });
+    } catch (err: any) {
+      const msg = err?.message ?? 'Authentication failed.';
+      if (msg.includes('cancel') || msg.includes('abort')) {
+        toast.info('Authentication was cancelled.');
+      } else {
+        setLastAuthResult('fail');
+        toast.error(msg);
+      }
     } finally {
-      setIsAuthenticating(false);
+      setIsAuthing(false);
     }
   };
 
-  const handleBiometricSetup = async (type: 'fingerprint' | 'face') => {
-    toast.info(`${type === 'fingerprint' ? 'Fingerprint' : 'Face recognition'} setup initiated`);
-    try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      toast.success(`${type === 'fingerprint' ? 'Fingerprint' : 'Face recognition'} configured successfully`);
-    } catch (error) {
-      toast.error('Biometric setup failed');
-    }
+  /* ── Revoke passkey ── */
+  const handleRevoke = (id: string, name: string) => {
+    deletePasskey(id);
+    reload();
+    refetchDash();
+    toast.success(`Passkey "${name}" revoked`);
   };
+
+  /* ── Copy credential ID ── */
+  const copyId = (id: string) => {
+    navigator.clipboard.writeText(id).then(() => toast.success('Credential ID copied'));
+  };
+
+  const strengthPct = passkeys.length === 0 ? 0 : Math.min(100, passkeys.length * 33);
 
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-3xl font-bold mb-2">WebAuthn & Passkeys</h1>
-        <p className="text-muted-foreground">Next-generation passwordless authentication with FIDO2 and biometric support</p>
+        <h1 className="text-3xl font-bold mb-2">Passkeys & WebAuthn</h1>
+        <p className="text-muted-foreground">FIDO2 passwordless authentication bound to your device's secure enclave</p>
       </div>
 
-      {/* Status Banner */}
-      <Card className={`border-border/40 glass-strong shadow-depth-md ${webAuthnSupported ? 'gradient-success' : 'gradient-warning'}`}>
-        <CardContent className="p-6">
+      {/* Status banner */}
+      <Card className={`border-border/40 glass-strong shadow-depth-md ${webAuthnAvail ? (passkeys.length > 0 ? 'gradient-success' : 'gradient-primary') : 'from-destructive/15 to-destructive/5'}`}>
+        <CardContent className="p-5">
           <div className="flex items-center gap-4">
-            {webAuthnSupported ? (
-              <>
-                <div className="p-3 rounded-xl bg-success/20 shadow-depth-sm">
-                  <CheckCircle2 className="h-6 w-6 text-success" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="font-semibold mb-1">WebAuthn Ready</h3>
-                  <p className="text-sm text-muted-foreground">Your browser supports passwordless authentication</p>
-                </div>
-                <Badge variant="secondary" className="text-xs">
+            <div className={`p-3 rounded-xl shadow-depth-sm ${webAuthnAvail ? 'bg-success/20' : 'bg-destructive/20'}`}>
+              {webAuthnAvail
+                ? <CheckCircle2 className="h-6 w-6 text-success" />
+                : <AlertCircle className="h-6 w-6 text-destructive" />}
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold mb-0.5">
+                {!webAuthnAvail
+                  ? 'WebAuthn not supported in this browser'
+                  : passkeys.length === 0
+                    ? 'WebAuthn ready — no passkeys registered yet'
+                    : `${passkeys.length} passkey${passkeys.length !== 1 ? 's' : ''} registered`}
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                {!webAuthnAvail
+                  ? 'Use Chrome, Firefox, Safari or Edge to register passkeys.'
+                  : platformAvail === true
+                    ? 'Platform authenticator available (Touch ID / Face ID / Windows Hello)'
+                    : platformAvail === false
+                      ? 'No platform authenticator — use a hardware security key'
+                      : 'Checking for platform authenticator…'}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {webAuthnAvail && (
+                <Badge variant="secondary" className="font-mono text-xs">
                   <Zap className="h-3 w-3 mr-1" />
-                  Active
+                  FIDO2
                 </Badge>
-              </>
-            ) : (
-              <>
-                <div className="p-3 rounded-xl bg-warning/20 shadow-depth-sm">
-                  <AlertCircle className="h-6 w-6 text-warning" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="font-semibold mb-1">Limited Support</h3>
-                  <p className="text-sm text-muted-foreground">WebAuthn may not be fully supported in this browser</p>
-                </div>
-              </>
-            )}
+              )}
+              {platformAvail && (
+                <Badge variant="secondary" className="font-mono text-xs">
+                  <Cpu className="h-3 w-3 mr-1" />
+                  Platform
+                </Badge>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -120,133 +157,130 @@ export default function PasskeysView() {
       <Tabs defaultValue="passkeys" className="space-y-6">
         <TabsList className="glass-effect border border-border/40">
           <TabsTrigger value="passkeys">Passkeys</TabsTrigger>
-          <TabsTrigger value="biometric">Biometric Auth</TabsTrigger>
+          <TabsTrigger value="authenticate">Authenticate</TabsTrigger>
           <TabsTrigger value="devices">Devices</TabsTrigger>
+          <TabsTrigger value="about">About FIDO2</TabsTrigger>
         </TabsList>
 
+        {/* ── Passkeys tab ── */}
         <TabsContent value="passkeys" className="space-y-6">
-          {/* Quick Actions */}
           <div className="grid md:grid-cols-2 gap-6">
+            {/* Create */}
             <Card className="border-border/40 glass-strong shadow-depth-md card-tactile gradient-primary">
               <CardHeader>
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="p-3 rounded-xl bg-primary/20 shadow-depth-sm">
-                    <Key className="h-6 w-6 text-primary" />
-                  </div>
+                <div className="flex items-center gap-3 mb-1">
+                  <div className="p-3 rounded-xl bg-primary/20 shadow-depth-sm"><Key className="h-6 w-6 text-primary" /></div>
                   <div>
-                    <CardTitle>Create Passkey</CardTitle>
-                    <CardDescription>Register a new passwordless credential</CardDescription>
+                    <CardTitle>Register Passkey</CardTitle>
+                    <CardDescription>Add a new FIDO2 credential to this device</CardDescription>
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Security Level</span>
-                    <Badge variant="secondary">Enterprise</Badge>
+                    <span className="text-muted-foreground">Security coverage</span>
+                    <span className="font-mono text-xs">{strengthPct}%</span>
                   </div>
-                  <Progress value={95} className="h-2" />
+                  <Progress value={strengthPct} className="h-2" />
                 </div>
-                <Button 
-                  onClick={handleCreatePasskey}
-                  disabled={isCreating || !webAuthnSupported}
-                  className="w-full rounded-full bg-primary hover:bg-primary/90 btn-press"
-                >
-                  {isCreating ? (
-                    <>
-                      <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                      Creating...
-                    </>
-                  ) : (
-                    <>
-                      <Key className="h-4 w-4 mr-2" />
-                      Create Passkey
-                    </>
-                  )}
-                </Button>
+                <div className="space-y-2">
+                  <Button
+                    onClick={() => handleCreate('platform')}
+                    disabled={isCreating || !webAuthnAvail}
+                    className="w-full rounded-full bg-primary hover:bg-primary/90 btn-press"
+                  >
+                    {isCreating ? (
+                      <><div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />Creating…</>
+                    ) : (
+                      <><Fingerprint className="h-4 w-4 mr-2" />Platform Authenticator (Touch ID / Face ID)</>
+                    )}
+                  </Button>
+                  <Button
+                    onClick={() => handleCreate('cross-platform')}
+                    disabled={isCreating || !webAuthnAvail}
+                    variant="outline"
+                    className="w-full rounded-full btn-press"
+                  >
+                    <Key className="h-4 w-4 mr-2" />Hardware Security Key (YubiKey etc.)
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Your browser will show a native prompt. The private key is generated inside your device's secure enclave and never transmitted.
+                </p>
               </CardContent>
             </Card>
 
-            <Card className="border-border/40 glass-strong shadow-depth-md card-tactile gradient-success">
+            {/* Revocation list */}
+            <Card className="border-border/40 glass-strong shadow-depth-md">
               <CardHeader>
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="p-3 rounded-xl bg-success/20 shadow-depth-sm">
-                    <Shield className="h-6 w-6 text-success" />
-                  </div>
-                  <div>
-                    <CardTitle>Authenticate</CardTitle>
-                    <CardDescription>Sign in with your passkey</CardDescription>
-                  </div>
-                </div>
+                <CardTitle>Credential Health</CardTitle>
+                <CardDescription>{passkeys.length} credential{passkeys.length !== 1 ? 's' : ''} registered</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Available Passkeys</span>
-                    <Badge variant="secondary">{registeredPasskeys.length}</Badge>
-                  </div>
-                  <Progress value={registeredPasskeys.length > 0 ? 100 : 0} className="h-2" />
+              <CardContent>
+                <div className="space-y-3">
+                  {[
+                    { label: 'Passkeys registered', value: passkeys.length, ok: passkeys.length > 0 },
+                    { label: 'Platform authenticator', value: platformAvail ? 'Available' : 'Not found', ok: !!platformAvail },
+                    { label: 'Phishing resistance', value: 'Full', ok: true },
+                    { label: 'Attestation', value: 'None (demo)', ok: true },
+                  ].map(({ label, value, ok }) => (
+                    <div key={label} className="flex items-center justify-between p-2.5 rounded-xl glass-effect border border-border/40">
+                      <div className="flex items-center gap-2">
+                        <div className={`h-2 w-2 rounded-full ${ok ? 'bg-success' : 'bg-warning'}`} />
+                        <span className="text-sm">{label}</span>
+                      </div>
+                      <span className="text-xs font-mono text-muted-foreground">{String(value)}</span>
+                    </div>
+                  ))}
                 </div>
-                <Button 
-                  onClick={handleAuthenticate}
-                  disabled={isAuthenticating || !webAuthnSupported || registeredPasskeys.length === 0}
-                  variant="outline"
-                  className="w-full rounded-full btn-press"
-                >
-                  {isAuthenticating ? (
-                    <>
-                      <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                      Authenticating...
-                    </>
-                  ) : (
-                    <>
-                      <Shield className="h-4 w-4 mr-2" />
-                      Authenticate
-                    </>
-                  )}
-                </Button>
               </CardContent>
             </Card>
           </div>
 
-          {/* Registered Passkeys */}
+          {/* Registered passkeys list */}
           <Card className="border-border/40 glass-strong shadow-depth-md">
             <CardHeader>
-              <CardTitle>Registered Passkeys</CardTitle>
-              <CardDescription>Manage your passwordless credentials across devices</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Registered Passkeys</CardTitle>
+                  <CardDescription>Manage your FIDO2 credentials</CardDescription>
+                </div>
+                <Button variant="ghost" size="sm" onClick={reload} className="rounded-full btn-press">
+                  <RefreshCw className="h-4 w-4 mr-1.5" />Refresh
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
-              {registeredPasskeys.length > 0 ? (
-                <ScrollArea className="h-[300px]">
-                  <div className="space-y-3">
-                    {registeredPasskeys.map((passkey) => (
-                      <div
-                        key={passkey.id}
-                        className="p-4 rounded-xl border border-border/40 glass-effect shadow-depth-sm card-tactile animate-slide-in"
-                      >
+              {passkeys.length > 0 ? (
+                <ScrollArea className="h-[320px]">
+                  <div className="space-y-3 pr-2">
+                    {passkeys.map(pk => (
+                      <div key={pk.id} className="p-4 rounded-xl border border-border/40 glass-effect shadow-depth-sm card-tactile animate-slide-in">
                         <div className="flex items-start gap-3">
-                          <div className="p-2.5 rounded-xl bg-primary/10 shadow-depth-sm">
-                            {passkey.type === 'platform' ? (
-                              <Smartphone className="h-5 w-5 text-primary" />
-                            ) : (
-                              <Key className="h-5 w-5 text-primary" />
-                            )}
+                          <div className="p-2.5 rounded-xl bg-primary/10 shadow-depth-sm mt-0.5">
+                            {pk.type === 'platform' ? <Smartphone className="h-5 w-5 text-primary" /> : <Key className="h-5 w-5 text-primary" />}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-2">
-                              <h4 className="font-semibold">{passkey.name}</h4>
-                              <Badge variant="secondary" className="text-xs">
-                                {passkey.type}
-                              </Badge>
+                            <div className="flex items-center gap-2 mb-1">
+                              <h4 className="font-semibold text-sm">{pk.name}</h4>
+                              <Badge variant="secondary" className="text-xs capitalize">{pk.type}</Badge>
                             </div>
-                            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                              <span>Created: {new Date(passkey.createdAt).toLocaleDateString()}</span>
-                              <span>Last used: {new Date(passkey.lastUsed).toLocaleDateString()}</span>
+                            <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                              <span className="flex items-center gap-1"><Clock className="h-3 w-3" />Created {new Date(pk.createdAt).toLocaleDateString()}</span>
+                              <span className="flex items-center gap-1"><RefreshCw className="h-3 w-3" />Used {new Date(pk.lastUsedAt).toLocaleDateString()}</span>
+                              <span className="flex items-center gap-1"><Shield className="h-3 w-3" />Count: {pk.signCount}</span>
                             </div>
+                            <div className="mt-1.5 font-mono text-[10px] text-white/20 truncate">{pk.id.slice(0, 32)}…</div>
                           </div>
-                          <Button variant="ghost" size="sm" className="rounded-full btn-press">
-                            Manage
-                          </Button>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full btn-press" onClick={() => copyId(pk.id)} title="Copy credential ID">
+                              <Copy className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full btn-press hover:text-destructive" onClick={() => handleRevoke(pk.id, pk.name)} title="Revoke passkey">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -254,204 +288,143 @@ export default function PasskeysView() {
                 </ScrollArea>
               ) : (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <div className="p-6 rounded-2xl bg-primary/10 mb-4">
-                    <Key className="h-12 w-12 text-primary" />
-                  </div>
-                  <h3 className="text-lg font-semibold mb-2">No passkeys registered</h3>
-                  <p className="text-sm text-muted-foreground mb-4 max-w-md">
-                    Create your first passkey to enable passwordless authentication
-                  </p>
+                  <div className="p-6 rounded-2xl bg-primary/10 mb-4"><Key className="h-12 w-12 text-primary" /></div>
+                  <h3 className="text-lg font-semibold mb-2">No passkeys yet</h3>
+                  <p className="text-sm text-muted-foreground mb-4 max-w-xs">Register a passkey above to enable passwordless, phishing-proof authentication.</p>
                 </div>
               )}
             </CardContent>
           </Card>
         </TabsContent>
 
-        <TabsContent value="biometric" className="space-y-6">
-          <div className="grid md:grid-cols-2 gap-6">
-            <Card className="border-border/40 glass-strong shadow-depth-md card-tactile">
-              <CardHeader>
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="p-3 rounded-xl bg-blue-500/20 shadow-depth-sm">
-                    <Fingerprint className="h-6 w-6 text-blue-500" />
-                  </div>
-                  <div>
-                    <CardTitle>Fingerprint Authentication</CardTitle>
-                    <CardDescription>Use your fingerprint for quick access</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20">
-                  <div className="flex items-center gap-3 mb-3">
-                    <CheckCircle2 className="h-5 w-5 text-blue-500" />
-                    <span className="text-sm font-medium">Touch ID / Fingerprint Sensor</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Secure biometric authentication using your device's fingerprint sensor
-                  </p>
-                </div>
-                <Button 
-                  onClick={() => handleBiometricSetup('fingerprint')}
-                  className="w-full rounded-full bg-blue-500 hover:bg-blue-600 btn-press"
-                >
-                  <Fingerprint className="h-4 w-4 mr-2" />
-                  Setup Fingerprint
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card className="border-border/40 glass-strong shadow-depth-md card-tactile">
-              <CardHeader>
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="p-3 rounded-xl bg-purple-500/20 shadow-depth-sm">
-                    <Fingerprint className="h-6 w-6 text-purple-500" />
-                  </div>
-                  <div>
-                    <CardTitle>Face Recognition</CardTitle>
-                    <CardDescription>Use facial recognition for authentication</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="p-4 rounded-xl bg-purple-500/10 border border-purple-500/20">
-                  <div className="flex items-center gap-3 mb-3">
-                    <CheckCircle2 className="h-5 w-5 text-purple-500" />
-                    <span className="text-sm font-medium">Face ID / Windows Hello</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Advanced facial recognition for seamless authentication
-                  </p>
-                </div>
-                <Button 
-                  onClick={() => handleBiometricSetup('face')}
-                  variant="outline"
-                  className="w-full rounded-full btn-press"
-                >
-                  <Fingerprint className="h-4 w-4 mr-2" />
-                  Setup Face Recognition
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Security Benefits */}
+        {/* ── Authenticate tab ── */}
+        <TabsContent value="authenticate" className="space-y-6">
           <Card className="border-border/40 glass-strong shadow-depth-md">
             <CardHeader>
-              <CardTitle>Security Benefits</CardTitle>
-              <CardDescription>Why biometric authentication is more secure</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid md:grid-cols-3 gap-4">
-                <BenefitCard
-                  icon={Lock}
-                  title="Phishing Resistant"
-                  description="Cannot be stolen or intercepted"
-                />
-                <BenefitCard
-                  icon={Zap}
-                  title="Fast & Convenient"
-                  description="Instant authentication"
-                />
-                <BenefitCard
-                  icon={Shield}
-                  title="Hardware Protected"
-                  description="Stored in secure enclave"
-                />
+              <div className="flex items-center gap-3 mb-1">
+                <div className="p-3 rounded-xl bg-success/20 shadow-depth-sm"><Shield className="h-6 w-6 text-success" /></div>
+                <div>
+                  <CardTitle>Authenticate Now</CardTitle>
+                  <CardDescription>Test passkey authentication using your registered credentials</CardDescription>
+                </div>
               </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="p-4 rounded-xl glass-effect border border-border/40 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Available passkeys</span>
+                  <Badge variant="secondary">{passkeys.length}</Badge>
+                </div>
+                <Progress value={passkeys.length > 0 ? 100 : 0} className="h-2" />
+              </div>
+
+              <Button
+                onClick={handleAuthenticate}
+                disabled={isAuthing || passkeys.length === 0 || !webAuthnAvail}
+                className="w-full rounded-full btn-press shadow-lg"
+                style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.8), rgba(16,185,129,0.8))' }}
+              >
+                {isAuthing ? (
+                  <><div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />Waiting for authenticator…</>
+                ) : (
+                  <><Shield className="h-4 w-4 mr-2" />Authenticate with Passkey</>
+                )}
+              </Button>
+
+              {lastAuthResult === 'success' && (
+                <div className="p-4 rounded-xl bg-success/10 border border-success/30 flex items-center gap-3">
+                  <CheckCircle2 className="h-5 w-5 text-success shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-success">Authentication successful</p>
+                    <p className="text-xs text-muted-foreground">Identity verified via FIDO2 assertion</p>
+                  </div>
+                </div>
+              )}
+              {lastAuthResult === 'fail' && (
+                <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/30 flex items-center gap-3">
+                  <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-destructive">Authentication failed</p>
+                    <p className="text-xs text-muted-foreground">Biometric verification was unsuccessful</p>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
 
+        {/* ── Devices tab ── */}
         <TabsContent value="devices" className="space-y-6">
           <Card className="border-border/40 glass-strong shadow-depth-md">
             <CardHeader>
-              <CardTitle>Trusted Devices</CardTitle>
-              <CardDescription>Devices registered for passwordless authentication</CardDescription>
+              <CardTitle>Registered Devices</CardTitle>
+              <CardDescription>Devices with active FIDO2 credentials</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                <DeviceCard
-                  name="MacBook Pro"
-                  type="macOS"
-                  icon={Laptop}
-                  status="active"
-                  lastUsed="2 hours ago"
-                />
-                <DeviceCard
-                  name="iPhone 15 Pro"
-                  type="iOS"
-                  icon={Smartphone}
-                  status="active"
-                  lastUsed="1 day ago"
-                />
-              </div>
+              {passkeys.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-6 text-center">No devices registered yet. Create a passkey to add this device.</p>
+              ) : (
+                <div className="space-y-3">
+                  {passkeys.map(pk => (
+                    <div key={pk.id} className="p-4 rounded-xl border border-border/40 glass-effect shadow-depth-sm flex items-center gap-3">
+                      <div className="p-2.5 rounded-xl bg-primary/10">
+                        {pk.type === 'platform' ? <Laptop className="h-5 w-5 text-primary" /> : <Key className="h-5 w-5 text-primary" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm">{pk.name}</p>
+                        <p className="text-xs text-muted-foreground font-mono">{pk.rpId} · alg {pk.algorithm}</p>
+                      </div>
+                      <Badge variant={pk.type === 'platform' ? 'default' : 'secondary'} className="text-xs shrink-0">
+                        {pk.type}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 
-          {/* Cross-Platform Support */}
+          <div className="grid md:grid-cols-4 gap-4">
+            {['Web', 'iOS', 'Android', 'Desktop'].map(p => (
+              <Card key={p} className="border-border/40 glass-effect shadow-depth-sm card-tactile text-center">
+                <CardContent className="p-4">
+                  <Globe className="h-7 w-7 mx-auto mb-2 text-success" />
+                  <h4 className="font-semibold text-sm mb-1">{p}</h4>
+                  <Badge variant="default" className="text-xs">Supported</Badge>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
+
+        {/* ── About FIDO2 tab ── */}
+        <TabsContent value="about" className="space-y-6">
           <Card className="border-border/40 glass-strong shadow-depth-md">
             <CardHeader>
-              <CardTitle>Cross-Platform Support</CardTitle>
-              <CardDescription>WebAuthn works across all your devices</CardDescription>
+              <CardTitle>How FIDO2 / WebAuthn Works</CardTitle>
+              <CardDescription>The cryptographic protocol behind passkeys</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid md:grid-cols-4 gap-4">
-                <PlatformCard platform="Web" supported />
-                <PlatformCard platform="iOS" supported />
-                <PlatformCard platform="Android" supported />
-                <PlatformCard platform="Desktop" supported />
+              <div className="grid md:grid-cols-2 gap-6">
+                {[
+                  { step: '1', title: 'Registration', desc: 'Your device generates a public/private key pair. The private key is stored in the secure enclave (TPM / Secure Element). The public key is sent to the server. Your biometric or PIN unlocks the private key locally — it never leaves your device.' },
+                  { step: '2', title: 'Authentication', desc: 'The server sends a random challenge. Your device signs it with the private key (after biometric verification). The server verifies the signature using the stored public key. No password is transmitted — ever.' },
+                  { step: '3', title: 'Phishing resistance', desc: 'The key pair is scoped to the exact origin (domain + scheme + port). A fake site cannot use your passkey for the real site. This makes passkeys fundamentally immune to credential phishing.' },
+                  { step: '4', title: 'FIDO Alliance MDS', desc: 'The FIDO Metadata Service (mds.fidoalliance.org) provides authenticator metadata for attestation validation. In production, server-side attestation verifies the authenticator model and its security guarantees.' },
+                ].map(({ step, title, desc }) => (
+                  <div key={step} className="p-4 rounded-xl glass-effect border border-border/40">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="h-7 w-7 rounded-full bg-primary/20 flex items-center justify-center font-mono text-xs font-bold text-primary">{step}</div>
+                      <h4 className="font-semibold">{title}</h4>
+                    </div>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{desc}</p>
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
-    </div>
-  );
-}
-
-function BenefitCard({ icon: Icon, title, description }: any) {
-  return (
-    <div className="p-4 rounded-xl glass-effect border border-border/40 shadow-depth-sm card-tactile">
-      <div className="p-2.5 rounded-xl bg-primary/10 mb-3 inline-block">
-        <Icon className="h-5 w-5 text-primary" />
-      </div>
-      <h4 className="font-semibold mb-1 text-sm">{title}</h4>
-      <p className="text-xs text-muted-foreground">{description}</p>
-    </div>
-  );
-}
-
-function DeviceCard({ name, type, icon: Icon, status, lastUsed }: any) {
-  return (
-    <div className="p-4 rounded-xl border border-border/40 glass-effect shadow-depth-sm card-tactile">
-      <div className="flex items-center gap-3">
-        <div className="p-2.5 rounded-xl bg-primary/10 shadow-depth-sm">
-          <Icon className="h-5 w-5 text-primary" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <h4 className="font-semibold text-sm">{name}</h4>
-            <Badge variant="secondary" className="text-xs">{type}</Badge>
-          </div>
-          <p className="text-xs text-muted-foreground">Last used: {lastUsed}</p>
-        </div>
-        <Badge variant={status === 'active' ? 'default' : 'secondary'} className="text-xs">
-          {status}
-        </Badge>
-      </div>
-    </div>
-  );
-}
-
-function PlatformCard({ platform, supported }: { platform: string; supported: boolean }) {
-  return (
-    <div className={`p-4 rounded-xl border border-border/40 glass-effect shadow-depth-sm text-center ${supported ? 'gradient-success' : 'opacity-50'}`}>
-      <Globe className={`h-8 w-8 mx-auto mb-2 ${supported ? 'text-success' : 'text-muted-foreground'}`} />
-      <h4 className="font-semibold text-sm mb-1">{platform}</h4>
-      <Badge variant={supported ? 'default' : 'secondary'} className="text-xs">
-        {supported ? 'Supported' : 'Coming Soon'}
-      </Badge>
     </div>
   );
 }
