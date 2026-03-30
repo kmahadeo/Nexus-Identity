@@ -105,21 +105,41 @@ export interface DuoConfig {
 }
 
 /**
- * Duo requires ALL authorization requests to be a signed JWT (JAR, RFC 9101)
- * regardless of application type. Signs with HS512 using the client secret.
+ * Duo requires ALL authorization requests to be a signed JWT (JAR, RFC 9101).
+ * Uses HS256 — the standard OIDC default. The client secret may be
+ * base64-encoded by Duo, so we try to decode it first; if that fails
+ * we fall back to treating it as raw UTF-8 bytes.
  */
 async function signDuoJWT(payload: Record<string, unknown>, secret: string): Promise<string> {
   const encoder = new TextEncoder();
-  const toB64   = (obj: object) => base64url(encoder.encode(JSON.stringify(obj)));
-  const header  = toB64({ alg: 'HS512', typ: 'JWT' });
-  const body    = toB64(payload);
-  const input   = `${header}.${body}`;
+
+  // Robust base64url that avoids spread-operator stack limits
+  function b64url(bytes: Uint8Array): string {
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  }
+
+  const header = b64url(encoder.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })));
+  const body   = b64url(encoder.encode(JSON.stringify(payload)));
+  const input  = `${header}.${body}`;
+
+  // Try base64-decoding the secret first (Duo secrets are often base64-encoded)
+  let keyBytes: Uint8Array;
+  try {
+    const raw = atob(secret.replace(/-/g, '+').replace(/_/g, '/'));
+    keyBytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) keyBytes[i] = raw.charCodeAt(i);
+  } catch {
+    keyBytes = encoder.encode(secret);
+  }
+
   const key = await crypto.subtle.importKey(
-    'raw', encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-512' }, false, ['sign'],
+    'raw', keyBytes,
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
   );
   const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(input));
-  return `${input}.${base64url(new Uint8Array(sig))}`;
+  return `${input}.${b64url(new Uint8Array(sig))}`;
 }
 
 export async function duoInitiateAuth(config: DuoConfig): Promise<void> {
