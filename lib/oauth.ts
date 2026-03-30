@@ -135,7 +135,7 @@ async function signDuoJWT(payload: Record<string, unknown>, secret: string): Pro
   }
 
   const key = await crypto.subtle.importKey(
-    'raw', keyBytes,
+    'raw', keyBytes.buffer.slice(keyBytes.byteOffset, keyBytes.byteOffset + keyBytes.byteLength),
     { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
   );
   const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(input));
