@@ -155,7 +155,7 @@ export async function duoInitiateAuth(config: DuoConfig, username?: string): Pro
 
   const request = await signDuoJWT(jwtPayload, config.clientSecret);
 
-  const params = new URLSearchParams({ client_id: config.clientId, request });
+  const params = new URLSearchParams({ response_type: 'code', client_id: config.clientId, request });
   window.location.href = `https://${config.apiHostname}/oauth/v1/authorize?${params}`;
 }
 
