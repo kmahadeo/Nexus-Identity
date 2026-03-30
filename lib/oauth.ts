@@ -174,11 +174,20 @@ export async function duoExchangeCode(
   });
 
   const credentials = btoa(`${config.clientId}:${config.clientSecret}`);
-  const res = await fetch(`https://${config.apiHostname}/oauth/v1/token`, {
+
+  // Route through the Vite dev proxy (/duo-token-proxy) when running locally
+  // to avoid CORS — the proxy forwards to https://{apiHostname}/oauth/v1/token.
+  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const tokenUrl = isLocal
+    ? '/duo-token-proxy'
+    : `https://${config.apiHostname}/oauth/v1/token`;
+
+  const res = await fetch(tokenUrl, {
     method: 'POST',
     headers: {
       'Authorization': `Basic ${credentials}`,
       'Content-Type': 'application/x-www-form-urlencoded',
+      'X-Duo-Hostname': config.apiHostname,
     },
     body: body.toString(),
   });
