@@ -339,6 +339,38 @@ export const connectorStorage = {
   },
 };
 
+/* ── Role Registry (email → saved account, enables returning-user login) ── */
+
+export interface RoleRegistryEntry {
+  email: string;
+  name: string;
+  role: UserRole;
+  tier: 'individual' | 'smb' | 'enterprise';
+  principalId: string;
+}
+
+const ROLE_REGISTRY_KEY = 'nexus-role-registry';
+
+export const roleRegistry = {
+  get(email: string): RoleRegistryEntry | null {
+    try {
+      const all: RoleRegistryEntry[] = JSON.parse(localStorage.getItem(ROLE_REGISTRY_KEY) ?? '[]');
+      return all.find(e => e.email.toLowerCase() === email.toLowerCase()) ?? null;
+    } catch { return null; }
+  },
+  getAll(): RoleRegistryEntry[] {
+    try { return JSON.parse(localStorage.getItem(ROLE_REGISTRY_KEY) ?? '[]'); } catch { return []; }
+  },
+  save(entry: RoleRegistryEntry): void {
+    try {
+      const all: RoleRegistryEntry[] = JSON.parse(localStorage.getItem(ROLE_REGISTRY_KEY) ?? '[]');
+      const idx = all.findIndex(e => e.email.toLowerCase() === entry.email.toLowerCase());
+      if (idx >= 0) all[idx] = entry; else all.push(entry);
+      localStorage.setItem(ROLE_REGISTRY_KEY, JSON.stringify(all));
+    } catch {}
+  },
+};
+
 /* ── Notification log ────────────────────────────────────────────────────── */
 
 export interface NotificationItem {

@@ -186,7 +186,7 @@ const ROLES: Array<{
 
 /* ── Component ──────────────────────────────────────────────────────────── */
 export default function LandingPage() {
-  const { login, loginStatus, selectRole } = useInternetIdentity();
+  const { loginStatus, loginWithEmail, selectRole, pendingEmail } = useInternetIdentity();
   const [theme, setTheme] = useState<Theme>('dark');
   const webglRef = useRef<HTMLDivElement>(null);
   const isLoggingIn   = loginStatus === 'logging-in';
@@ -194,25 +194,36 @@ export default function LandingPage() {
   const [hoveredRole, setHoveredRole] = useState<UserRole | null>(null);
   const [platformLabel, setPlatformLabel] = useState('Biometric');
   const [hasPasskey, setHasPasskey] = useState(false);
+  const [emailInput, setEmailInput] = useState('');
+  const [nameInput, setNameInput] = useState('');
+  const [emailError, setEmailError] = useState('');
 
   useAuraShader(webglRef, theme);
 
   useEffect(() => {
-    // Detect platform for biometric label
     const ua = navigator.userAgent;
-    if (/iPhone|iPad/.test(ua))          setPlatformLabel('Face ID / Touch ID');
-    else if (/Mac/.test(ua))             setPlatformLabel('Touch ID');
-    else if (/Win/.test(ua))             setPlatformLabel('Windows Hello');
-    else if (/Android/.test(ua))         setPlatformLabel('Fingerprint');
-    else                                  setPlatformLabel('Security Key');
+    if (/iPhone|iPad/.test(ua))      setPlatformLabel('Face ID / Touch ID');
+    else if (/Mac/.test(ua))         setPlatformLabel('Touch ID');
+    else if (/Win/.test(ua))         setPlatformLabel('Windows Hello');
+    else if (/Android/.test(ua))     setPlatformLabel('Fingerprint');
+    else                              setPlatformLabel('Security Key');
 
-    // Check if any passkeys exist in localStorage (returning user)
     const allKeys = Object.keys(localStorage).filter(k => k.startsWith('nexus-passkeys-'));
     const hasAny = allKeys.some(k => {
       try { return JSON.parse(localStorage.getItem(k) ?? '[]').length > 0; } catch { return false; }
     });
     setHasPasskey(hasAny);
   }, []);
+
+  const handleContinue = (withPasskey = false) => {
+    const em = emailInput.trim();
+    if (!em || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+      setEmailError('Please enter a valid email address');
+      return;
+    }
+    setEmailError('');
+    loginWithEmail(em, withPasskey);
+  };
 
   const toggleTheme = () => {
     const next: Theme = theme === 'dark' ? 'light' : 'dark';
@@ -303,7 +314,7 @@ export default function LandingPage() {
               maxWidth: '380px',
               margin: 0,
             }}>
-              Military-grade encryption, AI threat monitoring, and passwordless authentication — all on the Internet Computer Protocol.
+              Military-grade encryption, AI threat monitoring, and passwordless authentication — zero-knowledge, zero-trust.
             </p>
           </div>
 
@@ -313,7 +324,7 @@ export default function LandingPage() {
               { icon: Key, label: 'Passkeys & FIDO2', desc: 'Phishing-resistant passwordless login' },
               { icon: Lock, label: 'AES-256 Vault', desc: 'Zero-knowledge encrypted credential storage' },
               { icon: Zap, label: 'AI Threat Engine', desc: 'Real-time anomaly detection & auto-remediation' },
-              { icon: Globe, label: 'ICP Canister Backed', desc: 'Decentralised, tamper-proof identity layer' },
+              { icon: Globe, label: 'Sovereign Architecture', desc: 'User-scoped identity, no central point of failure' },
             ].map(({ icon: Icon, label, desc }) => (
               <div key={label} style={{
                 display: 'flex',
@@ -380,33 +391,69 @@ export default function LandingPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <div className="aura-system-badge">NEXUS.IDENTITY</div>
                   <h1 className="aura-h1">Authenticate</h1>
-                  <p className="aura-subtitle">Secure bio-metric or credential access to your identity vault.</p>
+                  <p className="aura-subtitle">
+                    {hasPasskey ? 'Welcome back — enter your email to continue.' : 'Enter your email to access your secure identity vault.'}
+                  </p>
                 </div>
 
-                {/* Quick access methods */}
-                <div className="aura-sso-grid">
-                  <button className="aura-btn-sso" aria-label="Passkey sign-in" title="Passkey / Hardware Key" onClick={login}>
-                    <Key size={20} />
-                  </button>
-                  <button className="aura-btn-sso" aria-label="Biometric sign-in" title={platformLabel} onClick={login}>
-                    <Fingerprint size={20} />
-                  </button>
-                  <button className="aura-btn-sso" aria-label="FIDO2 sign-in" title="FIDO2 / Zero-Trust" onClick={login}>
-                    <Shield size={20} />
-                  </button>
-                </div>
-
-                {/* Returning user — passkey nudge */}
-                {hasPasskey && (
-                  <div style={{
-                    padding: '10px 14px', borderRadius: '12px',
-                    background: 'rgba(34,211,238,0.07)', border: '1px solid rgba(34,211,238,0.2)',
-                    display: 'flex', alignItems: 'center', gap: '10px',
-                  }}>
-                    <Fingerprint size={15} style={{ color: '#22d3ee', flexShrink: 0 }} />
-                    <span style={{ fontFamily: 'Space Grotesk, sans-serif', fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>
-                      Passkey detected — click <strong style={{ color: '#22d3ee' }}>INITIALIZE UPLINK</strong> to authenticate with {platformLabel}
+                {/* Email input */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <input
+                    type="email"
+                    placeholder="you@example.com"
+                    value={emailInput}
+                    onChange={e => { setEmailInput(e.target.value); setEmailError(''); }}
+                    onKeyDown={e => e.key === 'Enter' && handleContinue(hasPasskey)}
+                    disabled={isLoggingIn}
+                    style={{
+                      width: '100%', padding: '12px 16px',
+                      background: 'var(--aura-bg-surface-1)',
+                      border: emailError ? '1px solid rgba(239,68,68,0.6)' : '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '14px', color: 'var(--aura-text-primary)',
+                      fontFamily: 'Space Grotesk, sans-serif', fontSize: '14px',
+                      outline: 'none', boxSizing: 'border-box',
+                    }}
+                  />
+                  {emailError && (
+                    <span style={{ fontFamily: 'Space Grotesk, sans-serif', fontSize: '11px', color: 'rgba(239,68,68,0.9)' }}>
+                      {emailError}
                     </span>
+                  )}
+                </div>
+
+                {/* Quick auth via passkey/biometric (shortcut — still requires email) */}
+                {hasPasskey && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div className="aura-sso-grid">
+                      <button
+                        className="aura-btn-sso" title={`Passkey — ${platformLabel}`}
+                        onClick={() => handleContinue(true)} disabled={isLoggingIn}
+                      >
+                        <Key size={20} />
+                      </button>
+                      <button
+                        className="aura-btn-sso" title={platformLabel}
+                        onClick={() => handleContinue(true)} disabled={isLoggingIn}
+                      >
+                        <Fingerprint size={20} />
+                      </button>
+                      <button
+                        className="aura-btn-sso" title="FIDO2 / Zero-Trust"
+                        onClick={() => handleContinue(true)} disabled={isLoggingIn}
+                      >
+                        <Shield size={20} />
+                      </button>
+                    </div>
+                    <div style={{
+                      padding: '10px 14px', borderRadius: '12px',
+                      background: 'rgba(34,211,238,0.07)', border: '1px solid rgba(34,211,238,0.2)',
+                      display: 'flex', alignItems: 'center', gap: '10px',
+                    }}>
+                      <Fingerprint size={15} style={{ color: '#22d3ee', flexShrink: 0 }} />
+                      <span style={{ fontFamily: 'Space Grotesk, sans-serif', fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>
+                        Passkey detected — use the icons above or click <strong style={{ color: '#22d3ee' }}>AUTHENTICATE</strong> below for {platformLabel}
+                      </span>
+                    </div>
                   </div>
                 )}
 
@@ -415,26 +462,26 @@ export default function LandingPage() {
                 {/* CTA */}
                 <button
                   className="aura-btn-primary"
-                  onClick={login}
+                  onClick={() => handleContinue(hasPasskey)}
                   disabled={isLoggingIn}
                 >
                   {isLoggingIn ? (
                     <>
-                      CONNECTING
+                      AUTHENTICATING
                       <div className="aura-dots"><span /><span /><span /></div>
                     </>
                   ) : (
-                    <>{hasPasskey ? `AUTHENTICATE WITH ${platformLabel.toUpperCase()}` : 'INITIALIZE UPLINK'}<ArrowRight size={18} /></>
+                    <>{hasPasskey ? `AUTHENTICATE WITH ${platformLabel.toUpperCase()}` : 'CONTINUE'}<ArrowRight size={18} /></>
                   )}
                 </button>
 
-                {/* Password fallback warning */}
+                {/* Security notice */}
                 <div style={{
                   padding: '10px 14px', borderRadius: '12px',
                   background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)',
                 }}>
                   <p style={{ fontFamily: 'Space Grotesk, sans-serif', fontSize: '11px', color: 'rgba(245,158,11,0.85)', margin: 0, lineHeight: 1.5 }}>
-                    ⚠️ If using a password: passwords must be rotated every 90 days and are vulnerable to phishing. <strong>Go passwordless</strong> with a passkey for maximum security.
+                    ⚠️ First time? You'll select your role after entering your email. Returning users are automatically restored to their previous session.
                   </p>
                 </div>
 
@@ -443,19 +490,39 @@ export default function LandingPage() {
                 </p>
               </>
             ) : (
-              /* ── Role selection ── */
+              /* ── Role selection (new users only) ── */
               <>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div className="aura-system-badge">IDENTITY CONFIRMED</div>
-                  <h1 className="aura-h1" style={{ fontSize: 'clamp(22px, 3vw, 30px)' }}>Who are you?</h1>
-                  <p className="aura-subtitle">Select your access role to personalise your Nexus Identity workspace.</p>
+                  <div className="aura-system-badge">CREATE YOUR IDENTITY</div>
+                  <h1 className="aura-h1" style={{ fontSize: 'clamp(22px, 3vw, 30px)' }}>Choose your role</h1>
+                  <p className="aura-subtitle">
+                    {pendingEmail && <span style={{ color: '#22d3ee' }}>{pendingEmail}</span>}
+                    {pendingEmail ? ' — ' : ''}
+                    Select your access level. You can request a role change from an admin later.
+                  </p>
                 </div>
 
+                {/* Optional display name */}
+                <input
+                  type="text"
+                  placeholder="Your name (optional)"
+                  value={nameInput}
+                  onChange={e => setNameInput(e.target.value)}
+                  style={{
+                    width: '100%', padding: '10px 14px',
+                    background: 'var(--aura-bg-surface-1)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: '12px', color: 'var(--aura-text-primary)',
+                    fontFamily: 'Space Grotesk, sans-serif', fontSize: '13px',
+                    outline: 'none', boxSizing: 'border-box',
+                  }}
+                />
+
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {ROLES.map(({ role, icon: Icon, label, desc, color, defaultName, defaultEmail, tier }) => (
+                  {ROLES.map(({ role, icon: Icon, label, desc, color, defaultName, tier }) => (
                     <button
                       key={role}
-                      onClick={() => selectRole(role, defaultName, defaultEmail, tier)}
+                      onClick={() => selectRole(role, nameInput.trim() || defaultName, pendingEmail || emailInput.trim() || `${role}@nexus.io`, tier)}
                       onMouseEnter={() => setHoveredRole(role)}
                       onMouseLeave={() => setHoveredRole(null)}
                       style={{
@@ -479,7 +546,7 @@ export default function LandingPage() {
                 </div>
 
                 <p style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', letterSpacing: '0.1em', color: 'var(--aura-text-tech)', textAlign: 'center' }}>
-                  ROLE SELECTION AFFECTS FEATURE ACCESS AND PERMISSIONS
+                  ROLE DEFINES FEATURE ACCESS AND PERMISSIONS — ADMINS CAN CHANGE THIS LATER
                 </p>
               </>
             )}

@@ -39,9 +39,11 @@ export default function SettingsPanel() {
   // Persist whenever cfg changes
   useEffect(() => { appSettings.set(cfg); }, [cfg]);
 
-  // Load API key draft from settings (never expose the real key directly)
+  // Load the ACTIVE provider's key draft on mount
   useEffect(() => {
-    const key = appSettings.get().ai.anthropicApiKey;
+    const s = appSettings.get();
+    const active = s.ai.providers?.find(p => p.provider === (s.ai.activeProvider ?? 'anthropic'));
+    const key = active?.apiKey || s.ai.anthropicApiKey || '';
     setApiKeyDraft(key ? '••••••••' + key.slice(-4) : '');
   }, []);
 
@@ -83,32 +85,51 @@ export default function SettingsPanel() {
   };
 
   const testApiKey = async () => {
-    const key = appSettings.get().ai.anthropicApiKey;
+    const s = appSettings.get();
+    const activeProviderName = s.ai.activeProvider ?? 'anthropic';
+    const provider = s.ai.providers?.find(p => p.provider === activeProviderName);
+    const key = provider?.apiKey || s.ai.anthropicApiKey || '';
     if (!key) { toast.error('Save an API key first'); return; }
     setTestingApi(true);
     setApiTestResult(null);
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': key,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 32,
-          messages: [{ role: 'user', content: 'Reply with: ok' }],
-        }),
-      });
+      let res: Response;
+      if (activeProviderName === 'anthropic') {
+        res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'content-type': 'application/json' },
+          body: JSON.stringify({ model: provider?.model || 'claude-haiku-4-5-20251001', max_tokens: 32, messages: [{ role: 'user', content: 'Reply with: ok' }] }),
+        });
+      } else if (activeProviderName === 'openai') {
+        res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${key}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ model: provider?.model || 'gpt-4o-mini', max_tokens: 16, messages: [{ role: 'user', content: 'Reply with: ok' }] }),
+        });
+      } else if (activeProviderName === 'gemini') {
+        const model = provider?.model || 'gemini-1.5-flash';
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Reply with: ok' }] }] }),
+        });
+      } else if (activeProviderName === 'custom' && provider?.baseUrl) {
+        res = await fetch(`${provider.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${key}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ model: provider.model, max_tokens: 16, messages: [{ role: 'user', content: 'Reply with: ok' }] }),
+        });
+      } else {
+        toast.error('Configure a base URL for custom provider'); setTestingApi(false); return;
+      }
       if (res.ok) {
         setApiTestResult('ok');
-        toast.success('API key is valid — Claude is reachable');
+        const providerLabel = { anthropic: 'Claude', openai: 'OpenAI', gemini: 'Gemini', custom: 'Custom LLM' }[activeProviderName];
+        toast.success(`${providerLabel} API key is valid`);
       } else {
         setApiTestResult('fail');
         let errDetail = '';
-        try { const body = await res.json(); errDetail = body?.error?.message || ''; } catch {}
+        try { const body = await res.json(); errDetail = body?.error?.message || body?.error?.status || ''; } catch {}
         toast.error(`API ${res.status}${errDetail ? ': ' + errDetail : ' — check your key'}`);
       }
     } catch (e: unknown) {
@@ -249,6 +270,10 @@ export default function SettingsPanel() {
                     appSettings.set(updated);
                     setCfg(updated);
                     setApiTestResult(null);
+                    // Update the key draft to show the selected provider's key
+                    const newActive = updated.ai.providers?.find(p => p.provider === v);
+                    const newKey = newActive?.apiKey || '';
+                    setApiKeyDraft(newKey ? '••••••••' + newKey.slice(-4) : '');
                     toast.success(`Active provider: ${v}`);
                   }}
                 >

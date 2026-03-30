@@ -52,6 +52,7 @@ export default function VaultView() {
       return;
     }
 
+    const nowNs = BigInt(Date.now()) * 1_000_000n;
     const entry: VaultEntry = {
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       name: formData.name.trim(),
@@ -63,8 +64,8 @@ export default function VaultView() {
       tags: [],
       category: formData.category,
       encryptedData: formData.password.trim() || formData.notes.trim(),
-      createdAt: BigInt(Date.now() * 1000000),
-      updatedAt: BigInt(Date.now() * 1000000),
+      createdAt: nowNs,
+      updatedAt: nowNs,
     };
 
     addEntry(entry, {
@@ -75,8 +76,9 @@ export default function VaultView() {
         setShowPassword(false);
         setIsDialogOpen(false);
       },
-      onError: () => {
-        toast.error('Failed to add vault entry');
+      onError: (err) => {
+        const msg = err instanceof Error ? err.message : 'Failed to add vault entry';
+        toast.error(msg);
       },
     });
   };

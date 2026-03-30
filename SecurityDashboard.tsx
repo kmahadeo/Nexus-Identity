@@ -1,5 +1,7 @@
 import { useGetDashboardData, useGetVaultEntries } from './hooks/useQueries';
 import { generateSecurePassword } from './lib/crypto';
+import { loadPasskeys } from './lib/webauthn';
+import { useInternetIdentity } from './hooks/useInternetIdentity';
 import { toast } from 'sonner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,12 +28,16 @@ import {
 export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: string) => void } = {}) {
   const { data: dashboardData, isLoading } = useGetDashboardData();
   const { data: vaultEntries } = useGetVaultEntries();
+  const { session } = useInternetIdentity();
 
+  const passkeys = loadPasskeys();
   const securityScore = Number(dashboardData?.securityScore || 0);
   const secureAccounts = vaultEntries?.filter(e => (e.password || e.encryptedData || '').length >= 8).length || 0;
   const totalAccounts = vaultEntries?.length || 0;
-  const passkeysActive = 1;
+  const passkeysActive = passkeys.length;
   const recommendationsCount = dashboardData?.recommendations?.length || 0;
+  const lastLoginTime = session ? new Date(session.loginAt).toLocaleTimeString() : '—';
+  const lastLoginDate = session ? new Date(session.loginAt).toLocaleDateString() : '—';
 
   const getScoreColor = (score: number) => {
     if (score >= 80) return 'text-success';
@@ -88,16 +94,20 @@ export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: 
         <CardHeader className="relative">
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="text-2xl mb-2">Overall Security Score</CardTitle>
-              <CardDescription>Based on {totalAccounts} accounts and security practices</CardDescription>
+              <CardTitle className="text-2xl mb-2">
+                {session ? `Welcome back, ${session.name.split(' ')[0]}!` : 'Overall Security Score'}
+              </CardTitle>
+              <CardDescription>
+                {session ? `${session.role} · ${session.tier} · Last login: ${lastLoginDate} ${lastLoginTime}` : `Based on ${totalAccounts} accounts and security practices`}
+              </CardDescription>
             </div>
             <div className="text-right">
               <div className={`text-5xl font-bold ${getScoreColor(securityScore)}`}>
                 {securityScore}%
               </div>
-              <div className="flex items-center gap-1 text-sm text-success mt-1">
+              <div className="flex items-center gap-1 text-sm text-muted-foreground mt-1">
                 <TrendingUp className="h-4 w-4" />
-                <span>+5% this month</span>
+                <span>Security score</span>
               </div>
             </div>
           </div>
@@ -118,10 +128,15 @@ export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: 
         <Card className="md:col-span-2 border-border/40 glass-strong shadow-depth-md card-tactile">
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>Identity Hub</CardTitle>
-              <Button size="sm" className="rounded-full btn-press">
+              <div>
+                <CardTitle>Identity Hub</CardTitle>
+                <CardDescription className="text-xs">
+                  {session ? `${session.principalId}` : 'No active session'}
+                </CardDescription>
+              </div>
+              <Button size="sm" className="rounded-full btn-press" onClick={() => onNavigate?.('vault')}>
                 <Sparkles className="h-4 w-4 mr-2" />
-                Add Identity
+                Manage Vault
               </Button>
             </div>
           </CardHeader>
@@ -129,23 +144,30 @@ export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: 
             <ScrollArea className="h-[400px]">
               <div className="space-y-3">
                 {vaultEntries && vaultEntries.length > 0 ? (
-                  vaultEntries.slice(0, 5).map((entry) => {
-                    const score = (entry.password || entry.encryptedData || '').length >= 8 ? 90 : 60;
-                    const status = score >= 80 ? 'secure' : 'warning';
+                  vaultEntries.slice(0, 8).map((entry) => {
+                    const secret = entry.password || entry.encryptedData || '';
+                    const score = secret.length >= 16 ? 95 : secret.length >= 12 ? 80 : secret.length >= 8 ? 65 : 40;
+                    const ageDays = (Date.now() - Number(entry.updatedAt) / 1_000_000) / 86400000;
+                    const status: 'secure' | 'warning' = score >= 80 && ageDays < 90 ? 'secure' : 'warning';
+                    const categoryIcons: Record<string, string> = { password: '🔐', 'api-key': '🔑', 'credit-card': '💳', note: '📝' };
                     return (
                       <IdentityItem
                         key={entry.id}
                         name={entry.name}
-                        lastUsed={new Date(Number(entry.updatedAt) / 1000000).toLocaleDateString()}
+                        subtitle={entry.username || entry.category}
+                        lastUsed={new Date(Number(entry.updatedAt) / 1_000_000).toLocaleDateString()}
                         score={score}
                         status={status}
-                        icon="🔐"
+                        icon={categoryIcons[entry.category] ?? '🔐'}
                       />
                     );
                   })
                 ) : (
-                  <div className="text-center py-8 text-muted-foreground">
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground gap-3">
                     <p className="text-sm">No vault entries yet</p>
+                    <Button size="sm" variant="outline" className="rounded-full btn-press" onClick={() => onNavigate?.('vault')}>
+                      Add first entry
+                    </Button>
                   </div>
                 )}
               </div>
@@ -158,39 +180,47 @@ export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: 
       </div>
 
       <div className="grid md:grid-cols-2 gap-6">
-        {/* Device Status */}
+        {/* Device & Session Status */}
         <Card className="border-border/40 glass-strong shadow-depth-md card-tactile">
           <CardHeader>
-            <CardTitle>Device Status</CardTitle>
+            <CardTitle>Session & Devices</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               <DeviceItem
-                name="Primary Device"
-                type="Trusted"
-                icon={Smartphone}
-                status="secure"
-              />
-              <DeviceItem
-                name="Work Device"
-                type="Trusted"
+                name={session ? `${session.name} (current)` : 'Current Device'}
+                type={`${navigator.platform || 'Browser'} · ${session?.role ?? 'guest'}`}
                 icon={Laptop}
                 status="secure"
               />
+              {passkeys.map((pk, i) => (
+                <DeviceItem
+                  key={pk.id}
+                  name={pk.name || `Passkey ${i + 1}`}
+                  type={`FIDO2 · Used ${pk.signCount}×`}
+                  icon={Smartphone}
+                  status="secure"
+                />
+              ))}
+              {passkeys.length === 0 && (
+                <div className="text-xs text-muted-foreground p-3 rounded-lg glass-effect border border-border/40">
+                  No passkeys registered. Add one in the Passkeys tab for stronger security.
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
 
-        {/* Network Security */}
+        {/* Vault & Auth Status */}
         <Card className="border-border/40 glass-strong shadow-depth-md card-tactile">
           <CardHeader>
-            <CardTitle>Network Security</CardTitle>
+            <CardTitle>Security Status</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <NetworkItem label="VPN Active" status="Secure" color="success" />
-              <NetworkItem label="Firewall" status="Active" color="success" />
-              <NetworkItem label="Threat Monitor" status="Scanning" color="primary" />
+              <NetworkItem label={`Vault (${totalAccounts} entries)`} status={totalAccounts > 0 ? 'Active' : 'Empty'} color={totalAccounts > 0 ? 'success' : 'primary'} />
+              <NetworkItem label={`Passkeys (${passkeysActive})`} status={passkeysActive > 0 ? 'Registered' : 'None'} color={passkeysActive > 0 ? 'success' : 'primary'} />
+              <NetworkItem label={`Threats (${recommendationsCount})`} status={recommendationsCount === 0 ? 'Clear' : 'Action needed'} color={recommendationsCount === 0 ? 'success' : 'destructive'} />
             </div>
           </CardContent>
         </Card>
@@ -316,28 +346,26 @@ function StatItem({ label, value }: { label: string; value: string }) {
   );
 }
 
-function IdentityItem({ name, lastUsed, score, status, icon }: any) {
+function IdentityItem({ name, subtitle, lastUsed, score, status, icon }: any) {
   return (
     <div className="flex items-center gap-4 p-4 rounded-xl glass-effect border border-border/40 shadow-depth-sm card-tactile animate-slide-in">
-      <div className="text-3xl">{icon}</div>
+      <div className="text-2xl">{icon}</div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
-          <h4 className="font-semibold">{name}</h4>
-          <Badge variant="secondary" className="text-xs">
+          <h4 className="font-semibold text-sm truncate">{name}</h4>
+          <Badge variant="secondary" className={`text-xs shrink-0 ${score >= 80 ? 'text-success' : score >= 60 ? 'text-warning' : 'text-destructive'}`}>
             {score}%
           </Badge>
         </div>
-        <p className="text-xs text-muted-foreground">Last used {lastUsed}</p>
+        {subtitle && <p className="text-xs text-muted-foreground truncate">{subtitle}</p>}
+        <p className="text-xs text-muted-foreground">Updated {lastUsed}</p>
       </div>
-      <div className="flex items-center gap-2">
-        <Progress value={score} className="w-20 h-2" />
+      <div className="flex items-center gap-2 shrink-0">
+        <Progress value={score} className="w-16 h-1.5" />
         <Badge variant={status === 'secure' ? 'default' : 'destructive'} className="text-xs">
           {status}
         </Badge>
       </div>
-      <Button variant="ghost" size="icon" className="rounded-full btn-press hover-scale">
-        →
-      </Button>
     </div>
   );
 }

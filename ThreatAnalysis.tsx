@@ -95,6 +95,10 @@ export default function ThreatAnalysis() {
   const [scanProgress, setScanProgress] = useState(0);
   const [fixingId, setFixingId] = useState<string | null>(null);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+  const [lastScanTime, setLastScanTime] = useState<Date | null>(() => {
+    const stored = localStorage.getItem('nexus-last-scan-time');
+    return stored ? new Date(Number(stored)) : null;
+  });
 
   const activeRecs = recommendations?.filter(r => !dismissedIds.has(r.id)) || [];
   const critical = activeRecs.filter(r => r.severity === 'critical').length;
@@ -116,6 +120,9 @@ export default function ThreatAnalysis() {
       setScanProgress(i);
     }
     setScanStatus('complete');
+    const now = new Date();
+    setLastScanTime(now);
+    localStorage.setItem('nexus-last-scan-time', String(now.getTime()));
     toast.success(`Scan complete — ${activeRecs.length} issue${activeRecs.length !== 1 ? 's' : ''} found`);
     setTimeout(() => setScanStatus('idle'), 3000);
   };
@@ -314,10 +321,14 @@ export default function ThreatAnalysis() {
                 <span className="text-sm font-medium">Last Scan</span>
                 <RefreshCw className="h-4 w-4 text-muted-foreground" />
               </div>
-              <p className="text-xs text-muted-foreground mb-1">2 minutes ago</p>
+              <p className="text-xs text-muted-foreground mb-1">
+                {lastScanTime ? lastScanTime.toLocaleString() : 'No scan yet — click Run Full Scan'}
+              </p>
               <div className="flex items-center gap-2">
-                <div className="h-1.5 w-1.5 rounded-full bg-success" />
-                <span className="text-xs text-success">Clean</span>
+                <div className={`h-1.5 w-1.5 rounded-full ${lastScanTime ? (activeRecs.length === 0 ? 'bg-success' : 'bg-warning') : 'bg-muted-foreground'}`} />
+                <span className={`text-xs ${lastScanTime ? (activeRecs.length === 0 ? 'text-success' : 'text-warning') : 'text-muted-foreground'}`}>
+                  {lastScanTime ? (activeRecs.length === 0 ? 'Clean' : `${activeRecs.length} issues`) : 'Not scanned'}
+                </span>
               </div>
             </CardContent>
           </Card>
