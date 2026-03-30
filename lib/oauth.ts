@@ -138,25 +138,24 @@ export async function duoInitiateAuth(config: DuoConfig, username?: string): Pro
   pkceStorage.save({ provider: 'duo', state, codeVerifier: verifier, redirectUri, startedAt: Date.now() });
 
   const now = Math.floor(Date.now() / 1000);
-  const jti = generateState(); // unique token ID
   const duoUsername = config.duoUsername || username || '';
 
+  // Matches the official Duo Universal Python SDK JWT payload exactly.
+  // use_duo_code_attribute:false → Duo returns ?code= (not ?duo_code=) in callback.
   const jwtPayload: Record<string, unknown> = {
-    response_type: 'code',
-    client_id: config.clientId,
-    redirect_uri: redirectUri,
     scope: 'openid',
-    state,
-    code_challenge: challenge,
-    code_challenge_method: 'S256',
-    duo_uname: duoUsername,
+    redirect_uri: redirectUri,
+    client_id: config.clientId,
     iss: config.clientId,
-    sub: config.clientId,
     aud: `https://${config.apiHostname}`,
     exp: now + 300,
     iat: now,
-    nbf: now,
-    jti,
+    state,
+    response_type: 'code',
+    duo_uname: duoUsername,
+    use_duo_code_attribute: false,
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
   };
 
   const request = await signDuoJWT(jwtPayload, config.clientSecret);
