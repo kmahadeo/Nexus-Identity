@@ -102,15 +102,26 @@ export interface DuoConfig {
   apiHostname: string;   // api-XXXXXXXX.duosecurity.com
   clientId: string;      // Client ID from Duo admin
   clientSecret: string;  // Client Secret from Duo admin
-  duoUsername?: string;  // Not used in OIDC flow — kept for display only
 }
 
 /**
- * Generic OIDC Relying Party flow — standard PKCE, no signed JWT.
- * Use "Generic OIDC Relying Party" application type in Duo Admin.
- * The Web SDK type requires server-side JWT signing which can't be
- * done securely from a browser.
+ * Duo requires ALL authorization requests to be a signed JWT (JAR, RFC 9101)
+ * regardless of application type. Signs with HS512 using the client secret.
  */
+async function signDuoJWT(payload: Record<string, unknown>, secret: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const toB64   = (obj: object) => base64url(encoder.encode(JSON.stringify(obj)));
+  const header  = toB64({ alg: 'HS512', typ: 'JWT' });
+  const body    = toB64(payload);
+  const input   = `${header}.${body}`;
+  const key = await crypto.subtle.importKey(
+    'raw', encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-512' }, false, ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(input));
+  return `${input}.${base64url(new Uint8Array(sig))}`;
+}
+
 export async function duoInitiateAuth(config: DuoConfig): Promise<void> {
   const verifier    = generateCodeVerifier();
   const challenge   = await generateCodeChallenge(verifier);
@@ -119,16 +130,22 @@ export async function duoInitiateAuth(config: DuoConfig): Promise<void> {
 
   pkceStorage.save({ provider: 'duo', state, codeVerifier: verifier, redirectUri, startedAt: Date.now() });
 
-  const params = new URLSearchParams({
-    response_type: 'code',
-    client_id: config.clientId,
-    redirect_uri: redirectUri,
-    scope: 'openid',
+  const now = Math.floor(Date.now() / 1000);
+  const request = await signDuoJWT({
+    response_type:        'code',
+    client_id:            config.clientId,
+    redirect_uri:         redirectUri,
+    scope:                'openid',
     state,
-    code_challenge: challenge,
-    code_challenge_method: 'S256',
-  });
+    code_challenge:       challenge,
+    code_challenge_method:'S256',
+    iss:                  config.clientId,
+    aud:                  `https://${config.apiHostname}`,
+    exp:                  now + 300,
+    iat:                  now,
+  }, config.clientSecret);
 
+  const params = new URLSearchParams({ response_type: 'code', client_id: config.clientId, request });
   window.location.href = `https://${config.apiHostname}/oauth/v1/authorize?${params}`;
 }
 
