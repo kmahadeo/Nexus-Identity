@@ -102,6 +102,7 @@ export interface DuoConfig {
   apiHostname: string;   // api-XXXXXXXX.duosecurity.com
   clientId: string;      // Integration Key (DI...)
   clientSecret: string;  // Secret Key
+  duoUsername?: string;  // Username as it appears in Duo admin (email or alias)
 }
 
 /**
@@ -137,6 +138,9 @@ export async function duoInitiateAuth(config: DuoConfig, username?: string): Pro
   pkceStorage.save({ provider: 'duo', state, codeVerifier: verifier, redirectUri, startedAt: Date.now() });
 
   const now = Math.floor(Date.now() / 1000);
+  const jti = generateState(); // unique token ID
+  const duoUsername = config.duoUsername || username || '';
+
   const jwtPayload: Record<string, unknown> = {
     response_type: 'code',
     client_id: config.clientId,
@@ -145,13 +149,15 @@ export async function duoInitiateAuth(config: DuoConfig, username?: string): Pro
     state,
     code_challenge: challenge,
     code_challenge_method: 'S256',
+    duo_uname: duoUsername,
     iss: config.clientId,
-    aud: `https://${config.apiHostname}/oauth/v1/authorize`,
+    sub: config.clientId,
+    aud: `https://${config.apiHostname}`,
     exp: now + 300,
     iat: now,
     nbf: now,
+    jti,
   };
-  if (username) jwtPayload.duo_uname = username;
 
   const request = await signDuoJWT(jwtPayload, config.clientSecret);
 
