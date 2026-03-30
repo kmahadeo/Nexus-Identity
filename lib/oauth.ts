@@ -104,6 +104,30 @@ export interface DuoConfig {
   clientSecret: string;  // Secret Key
 }
 
+/**
+ * Sign a JWT with HMAC-SHA512 (HS512) using browser-native crypto.subtle.
+ * Duo Web SDK v4 requires the authorization request to be a signed JWT
+ * passed as the `request` query parameter (JAR — RFC 9101).
+ */
+async function signDuoJWT(payload: Record<string, unknown>, secret: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const toB64 = (obj: object) => base64url(encoder.encode(JSON.stringify(obj)));
+
+  const header = toB64({ alg: 'HS512', typ: 'JWT' });
+  const body   = toB64(payload);
+  const signingInput = `${header}.${body}`;
+
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-512' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(signingInput));
+  return `${signingInput}.${base64url(new Uint8Array(sig))}`;
+}
+
 export async function duoInitiateAuth(config: DuoConfig, username?: string): Promise<void> {
   const verifier  = generateCodeVerifier();
   const challenge = await generateCodeChallenge(verifier);
@@ -112,7 +136,8 @@ export async function duoInitiateAuth(config: DuoConfig, username?: string): Pro
 
   pkceStorage.save({ provider: 'duo', state, codeVerifier: verifier, redirectUri, startedAt: Date.now() });
 
-  const params = new URLSearchParams({
+  const now = Math.floor(Date.now() / 1000);
+  const jwtPayload: Record<string, unknown> = {
     response_type: 'code',
     client_id: config.clientId,
     redirect_uri: redirectUri,
@@ -120,9 +145,17 @@ export async function duoInitiateAuth(config: DuoConfig, username?: string): Pro
     state,
     code_challenge: challenge,
     code_challenge_method: 'S256',
-  });
-  if (username) params.set('duo_uname', username);
+    iss: config.clientId,
+    aud: `https://${config.apiHostname}`,
+    exp: now + 300,
+    iat: now,
+    nbf: now,
+  };
+  if (username) jwtPayload.duo_uname = username;
 
+  const request = await signDuoJWT(jwtPayload, config.clientSecret);
+
+  const params = new URLSearchParams({ client_id: config.clientId, request });
   window.location.href = `https://${config.apiHostname}/oauth/v1/authorize?${params}`;
 }
 
