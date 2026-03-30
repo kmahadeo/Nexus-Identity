@@ -115,7 +115,7 @@ export default function AISecurityCoach() {
           priority: priorityStr,
           category: 'AI',
           actionable: false,
-          createdAt: BigInt(Date.now() * 1_000_000),
+          createdAt: BigInt(Date.now()) * 1_000_000n,
         });
       }
     }

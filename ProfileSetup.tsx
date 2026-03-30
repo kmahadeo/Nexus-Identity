@@ -22,8 +22,8 @@ export default function ProfileSetup() {
     const profile: UserProfile = {
       name: name.trim(),
       email: email.trim(),
-      createdAt: BigInt(Date.now() * 1_000_000),
-      lastLogin: BigInt(Date.now() * 1_000_000),
+      createdAt: BigInt(Date.now()) * 1_000_000n,
+      lastLogin: BigInt(Date.now()) * 1_000_000n,
     };
     saveProfile(profile, {
       onSuccess: () => toast.success('Profile created successfully!'),

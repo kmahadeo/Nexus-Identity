@@ -7,17 +7,30 @@ import type { VaultEntry } from '../backend';
 
 /* ── Generic helpers ─────────────────────────────────────────────────────── */
 
+/** JSON replacer that serialises BigInt as "__bi__<value>" strings. */
+function replacer(_key: string, value: unknown): unknown {
+  return typeof value === 'bigint' ? `__bi__${value.toString()}` : value;
+}
+
+/** JSON reviver that restores "__bi__<value>" strings back to BigInt. */
+function reviver(_key: string, value: unknown): unknown {
+  if (typeof value === 'string' && value.startsWith('__bi__')) {
+    return BigInt(value.slice(6));
+  }
+  return value;
+}
+
 function ls<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
-    return raw != null ? (JSON.parse(raw) as T) : fallback;
+    return raw != null ? (JSON.parse(raw, reviver) as T) : fallback;
   } catch {
     return fallback;
   }
 }
 
 function lsSet(key: string, value: unknown): void {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* quota */ }
+  try { localStorage.setItem(key, JSON.stringify(value, replacer)); } catch { /* quota */ }
 }
 
 /* ── Session / Role ──────────────────────────────────────────────────────── */

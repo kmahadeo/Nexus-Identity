@@ -11,10 +11,13 @@ import { canDo } from '../lib/permissions';
 
 /* ── Demo seed data for guest / first-time users ──────────────────────── */
 
+const _now = BigInt(Date.now());
+const _ms = 1_000_000n;
+const _day = 86_400_000n;
 const DEMO_VAULT: VaultEntry[] = [
-  { id: 'd1', name: 'GitHub (Demo)', title: 'GitHub', username: 'demo@nexus.io', password: 'gh_tok_Demo#2024!Xyz', url: 'https://github.com', category: 'Development', tags: ['dev'], createdAt: BigInt(Date.now() * 1_000_000 - 86400000 * 200 * 1_000_000), updatedAt: BigInt(Date.now() * 1_000_000 - 86400000 * 95 * 1_000_000), notes: 'Demo — rotate quarterly', encryptedData: '' },
-  { id: 'd2', name: 'AWS Console (Demo)', title: 'AWS Console', username: 'demo@nexus.io', password: 'AWSdemo!Key2024', url: 'https://aws.amazon.com', category: 'Cloud', tags: ['cloud'], createdAt: BigInt(Date.now() * 1_000_000 - 86400000 * 150 * 1_000_000), updatedAt: BigInt(Date.now() * 1_000_000 - 86400000 * 100 * 1_000_000), notes: 'Demo AWS account', encryptedData: '' },
-  { id: 'd3', name: 'Stripe (Demo)', title: 'Stripe', username: 'demo@nexus.io', password: 'sk_demo_1234', url: 'https://stripe.com', category: 'Finance', tags: ['payments'], createdAt: BigInt(Date.now() * 1_000_000 - 86400000 * 60 * 1_000_000), updatedAt: BigInt(Date.now() * 1_000_000 - 86400000 * 30 * 1_000_000), notes: 'Demo API key', encryptedData: '' },
+  { id: 'd1', name: 'GitHub (Demo)', title: 'GitHub', username: 'demo@nexus.io', password: 'gh_tok_Demo#2024!Xyz', url: 'https://github.com', category: 'Development', tags: ['dev'], createdAt: (_now - _day * 200n) * _ms, updatedAt: (_now - _day * 95n) * _ms, notes: 'Demo — rotate quarterly', encryptedData: '' },
+  { id: 'd2', name: 'AWS Console (Demo)', title: 'AWS Console', username: 'demo@nexus.io', password: 'AWSdemo!Key2024', url: 'https://aws.amazon.com', category: 'Cloud', tags: ['cloud'], createdAt: (_now - _day * 150n) * _ms, updatedAt: (_now - _day * 100n) * _ms, notes: 'Demo AWS account', encryptedData: '' },
+  { id: 'd3', name: 'Stripe (Demo)', title: 'Stripe', username: 'demo@nexus.io', password: 'sk_demo_1234', url: 'https://stripe.com', category: 'Finance', tags: ['payments'], createdAt: (_now - _day * 60n) * _ms, updatedAt: (_now - _day * 30n) * _ms, notes: 'Demo API key', encryptedData: '' },
 ];
 
 function seedGuestVault() {
@@ -120,7 +123,7 @@ export function useGetCallerUserProfile() {
     queryFn: async () => {
       const session = sessionStorage_.get();
       if (!session) return null;
-      return { name: session.name, email: session.email, createdAt: BigInt(session.loginAt * 1_000_000), lastLogin: BigInt(session.loginAt * 1_000_000) };
+      return { name: session.name, email: session.email, createdAt: BigInt(session.loginAt) * 1_000_000n, lastLogin: BigInt(session.loginAt) * 1_000_000n };
     },
     staleTime: Infinity,
   });
@@ -162,11 +165,11 @@ export function useGetDashboardData() {
         reusedPasswords: reused,
         breachedAccounts: 0,
         securityScore: score,
-        lastScanTime: BigInt(Date.now() * 1_000_000),
+        lastScanTime: BigInt(Date.now()) * 1_000_000n,
         activeDevices: 2,
         passkeysCount: passkeys.length,
         recentActivity: [
-          { id: '1', action: 'Login', details: session ? `${session.role} login via Nexus Identity` : 'Session resumed', timestamp: BigInt(Date.now() * 1_000_000), ipAddress: '127.0.0.1', deviceName: 'Current Device' },
+          { id: '1', action: 'Login', details: session ? `${session.role} login via Nexus Identity` : 'Session resumed', timestamp: BigInt(Date.now()) * 1_000_000n, ipAddress: '127.0.0.1', deviceName: 'Current Device' },
         ],
         recommendations: findings.slice(0, 10).map((f, i) => ({
           id: f.id, title: f.title, message: f.description, description: f.description,
@@ -281,7 +284,7 @@ export function useAutoApplyFix() {
       if (fix.entryId) {
         const entry = vaultStorage.getRaw().find(e => e.id === fix.entryId);
         if (entry) {
-          vaultStorage.update({ ...entry, updatedAt: BigInt(Date.now() * 1_000_000) });
+          vaultStorage.update({ ...entry, updatedAt: BigInt(Date.now()) * 1_000_000n });
         }
       }
       return { advice: 'Fix applied.', riskScore: BigInt(5), confidence: BigInt(99) };
@@ -298,11 +301,15 @@ export function useAutoApplyFix() {
 
 const TEAMS_KEY = 'nexus-teams';
 
+/** Replacer/reviver for BigInt serialisation (mirrors lib/storage.ts helpers). */
+function bigintReplacer(_k: string, v: unknown) { return typeof v === 'bigint' ? `__bi__${v}` : v; }
+function bigintReviver(_k: string, v: unknown) { return typeof v === 'string' && v.startsWith('__bi__') ? BigInt(v.slice(6)) : v; }
+
 function loadTeams(): Team[] {
-  try { return JSON.parse(localStorage.getItem(TEAMS_KEY) ?? '[]'); } catch { return []; }
+  try { return JSON.parse(localStorage.getItem(TEAMS_KEY) ?? '[]', bigintReviver); } catch { return []; }
 }
 function saveTeams(t: Team[]) {
-  try { localStorage.setItem(TEAMS_KEY, JSON.stringify(t)); } catch {}
+  try { localStorage.setItem(TEAMS_KEY, JSON.stringify(t, bigintReplacer)); } catch {}
 }
 
 export function useGetTeams() {
@@ -340,25 +347,11 @@ export function useAddTeamMember() {
 const SHARED_KEY = 'nexus-shared-entries';
 
 function loadSharedEntries(): SharedVaultEntry[] {
-  try {
-    return JSON.parse(localStorage.getItem(SHARED_KEY) ?? '[]').map((e: Record<string, unknown>) => ({
-      ...e,
-      sharedAt:  BigInt(String(e.sharedAt  ?? 0)),
-      createdAt: BigInt(String(e.createdAt ?? 0)),
-      updatedAt: BigInt(String(e.updatedAt ?? 0)),
-    }));
-  } catch { return []; }
+  try { return JSON.parse(localStorage.getItem(SHARED_KEY) ?? '[]', bigintReviver); } catch { return []; }
 }
 
 function persistSharedEntries(entries: SharedVaultEntry[]): void {
-  try {
-    localStorage.setItem(SHARED_KEY, JSON.stringify(entries.map(e => ({
-      ...e,
-      sharedAt:  String(e.sharedAt),
-      createdAt: String(e.createdAt),
-      updatedAt: String(e.updatedAt),
-    }))));
-  } catch {}
+  try { localStorage.setItem(SHARED_KEY, JSON.stringify(entries, bigintReplacer)); } catch {}
 }
 
 export function useGetSharedVaultEntries() {
