@@ -1,13 +1,26 @@
+import { useEffect } from 'react';
 import { useInternetIdentity } from './hooks/useInternetIdentity';
 import { Toaster } from '@/components/ui/sonner';
 import { useTenant } from './TenantContext';
 import NexusLogo from './NexusLogo';
 import LandingPage from './LandingPage';
 import MainApp from './MainApp';
+import { callbackStorage } from './lib/oauth';
 
 export default function App() {
   const { isInitializing, loginStatus, session } = useInternetIdentity();
   const { tier } = useTenant();
+
+  // Capture OAuth2 callback params before client-side routing cleans the URL
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const code  = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
+    if (code && state) {
+      callbackStorage.save(code, state);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   // Only considered authenticated once role selection is complete
   const isAuthenticated = loginStatus === 'logged-in';

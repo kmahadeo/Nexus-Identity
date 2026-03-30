@@ -17,7 +17,7 @@ import {
   duoInitiateAuth, duoExchangeCode,
   entraInitiateAuth, entraExchangeCode,
   oktaInitiateAuth, oktaExchangeCode,
-  pkceStorage, tokenStorage, decodeJwtPayload,
+  pkceStorage, tokenStorage, callbackStorage, decodeJwtPayload,
   type DuoConfig, type EntraConfig, type OktaConfig, type ConnectorToken,
 } from './lib/oauth';
 import { connectorStorage } from './lib/storage';
@@ -106,17 +106,20 @@ export default function Integrations() {
 
   /* ── OAuth2 callback handler ── */
   useEffect(() => {
-    const url   = new URL(window.location.href);
-    const code  = url.searchParams.get('code');
-    const state = url.searchParams.get('state');
-    const error = url.searchParams.get('error');
+    // Check callbackStorage first (set by App.tsx before routing cleaned the URL),
+    // then fall back to reading directly from the current URL.
+    const pending = callbackStorage.get();
+    const url     = new URL(window.location.href);
+    const code    = pending?.code  ?? url.searchParams.get('code');
+    const state   = pending?.state ?? url.searchParams.get('state');
+    const error   = url.searchParams.get('error');
 
     if (!code && !error) return;
 
     const pkce = pkceStorage.get();
     if (!pkce) return;
 
-    // Clean URL immediately
+    callbackStorage.clear();
     window.history.replaceState({}, '', window.location.pathname);
     pkceStorage.clear();
 

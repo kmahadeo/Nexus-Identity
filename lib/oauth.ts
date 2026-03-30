@@ -293,6 +293,25 @@ export async function oktaExchangeCode(
   return res.json();
 }
 
+/* ── Pending OAuth2 callback storage ─────────────────────────────────────── */
+
+const CALLBACK_KEY = 'nexus-oauth-callback';
+
+/**
+ * App.tsx captures ?code=&state= on first load and stores them here so that
+ * the Integrations component can process the callback even after client-side
+ * routing has cleaned the URL.
+ */
+export const callbackStorage = {
+  save(code: string, state: string) {
+    sessionStorage.setItem(CALLBACK_KEY, JSON.stringify({ code, state }));
+  },
+  get(): { code: string; state: string } | null {
+    try { return JSON.parse(sessionStorage.getItem(CALLBACK_KEY) ?? 'null'); } catch { return null; }
+  },
+  clear() { sessionStorage.removeItem(CALLBACK_KEY); },
+};
+
 /* ── Token storage ────────────────────────────────────────────────────────── */
 
 const TOKENS_KEY = 'nexus-oauth-tokens';
