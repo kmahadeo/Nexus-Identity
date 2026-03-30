@@ -165,11 +165,13 @@ export async function duoExchangeCode(
   codeVerifier: string,
   redirectUri: string,
 ): Promise<OAuthTokenResponse> {
+  // Duo accepts client_secret in the POST body AND as Basic auth — send both.
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
     redirect_uri: redirectUri,
     client_id: config.clientId,
+    client_secret: config.clientSecret,
     code_verifier: codeVerifier,
   });
 
