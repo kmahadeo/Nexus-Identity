@@ -146,7 +146,7 @@ export async function duoInitiateAuth(config: DuoConfig, username?: string): Pro
     code_challenge: challenge,
     code_challenge_method: 'S256',
     iss: config.clientId,
-    aud: `https://${config.apiHostname}`,
+    aud: `https://${config.apiHostname}/oauth/v1/authorize`,
     exp: now + 300,
     iat: now,
     nbf: now,
