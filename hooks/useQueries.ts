@@ -5,7 +5,7 @@ import type {
 } from '../backend';
 import {
   vaultStorage, sessionStorage_, settings, policyStorage, connectorStorage,
-  userRegistry, type SecurityPolicy, type RegisteredUser,
+  userRegistry, notificationStorage, type SecurityPolicy, type RegisteredUser,
 } from '../lib/storage';
 import { canDo } from '../lib/permissions';
 
@@ -203,12 +203,14 @@ export function useAddVaultEntry() {
         throw new Error('Guest accounts are read-only. Log in with a full account to add entries.');
       }
       vaultStorage.add(entry);
+      notificationStorage.add({ title: 'Vault entry added', body: `"${entry.name}" saved to your vault.`, type: 'success' });
       return entry;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vaultEntries'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardData'] });
       queryClient.invalidateQueries({ queryKey: ['recommendations'] });
+      queryClient.invalidateQueries({ queryKey: ['allUsers'] }); // refresh admin counts
     },
   });
 }
@@ -238,6 +240,7 @@ export function useDeleteVaultEntry() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vaultEntries'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardData'] });
+      queryClient.invalidateQueries({ queryKey: ['allUsers'] });
     },
   });
 }
@@ -313,7 +316,7 @@ export function useCreateTeam() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (name: string) => {
-      const team: Team = { id: crypto.randomUUID(), name, members: [], createdAt: BigInt(Date.now() * 1_000_000) };
+      const team: Team = { id: crypto.randomUUID(), name, members: [], createdAt: BigInt(Date.now()) * 1_000_000n };
       saveTeams([...loadTeams(), team]);
       return team;
     },
@@ -334,14 +337,63 @@ export function useAddTeamMember() {
   });
 }
 
+const SHARED_KEY = 'nexus-shared-entries';
+
+function loadSharedEntries(): SharedVaultEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem(SHARED_KEY) ?? '[]').map((e: Record<string, unknown>) => ({
+      ...e,
+      sharedAt:  BigInt(String(e.sharedAt  ?? 0)),
+      createdAt: BigInt(String(e.createdAt ?? 0)),
+      updatedAt: BigInt(String(e.updatedAt ?? 0)),
+    }));
+  } catch { return []; }
+}
+
+function persistSharedEntries(entries: SharedVaultEntry[]): void {
+  try {
+    localStorage.setItem(SHARED_KEY, JSON.stringify(entries.map(e => ({
+      ...e,
+      sharedAt:  String(e.sharedAt),
+      createdAt: String(e.createdAt),
+      updatedAt: String(e.updatedAt),
+    }))));
+  } catch {}
+}
+
 export function useGetSharedVaultEntries() {
-  return useQuery<SharedVaultEntry[]>({ queryKey: ['sharedVaultEntries'], queryFn: async () => [] });
+  return useQuery<SharedVaultEntry[]>({
+    queryKey: ['sharedVaultEntries'],
+    queryFn: async () => loadSharedEntries(),
+  });
 }
 
 export function useShareVaultEntry() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (_: unknown) => {},
+    mutationFn: async ({ entry, sharedWith, permissions }: { entry: VaultEntry; sharedWith: string[]; permissions: string[] }) => {
+      const nowNs = BigInt(Date.now()) * 1_000_000n;
+      const shared: SharedVaultEntry = {
+        id: crypto.randomUUID(),
+        name: entry.name,
+        title: entry.title || entry.name,
+        username: entry.username || '',
+        password: '',  // never store the actual password in shared entry
+        url: entry.url || '',
+        category: entry.category || '',
+        tags: entry.tags || [],
+        notes: entry.notes || '',
+        encryptedData: entry.encryptedData,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+        entry,
+        sharedWith,
+        permissions,
+        sharedAt: nowNs,
+      };
+      persistSharedEntries([...loadSharedEntries(), shared]);
+      return shared;
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sharedVaultEntries'] }),
   });
 }
@@ -435,7 +487,77 @@ export function useGetAIRecommendations() {
 export function useGetAIRecommendationsQuery(context: AIContext | null) {
   return useQuery<AIResponse>({
     queryKey: ['aiRecommendations', context],
-    queryFn: async () => ({ advice: 'Your security posture is strong. Keep rotating credentials regularly.', riskScore: BigInt(18), confidence: BigInt(96) }),
+    queryFn: async (): Promise<AIResponse> => {
+      if (!context) return { advice: '', riskScore: BigInt(0), confidence: BigInt(0) };
+
+      const provider = settings.getActiveProvider();
+      const apiKey = provider?.apiKey || settings.getAiKey();
+      const vaultData = (() => { try { return JSON.parse(context.vaultHealth); } catch { return {}; } })();
+      const weak = vaultData.weakPasswords || 0;
+      const old  = vaultData.oldCredentials || 0;
+      const total = vaultData.totalEntries || 0;
+      const baseRisk = Math.min(100, weak * 15 + old * 8 + (total === 0 ? 20 : 0));
+
+      if (apiKey && provider?.enabled !== false) {
+        try {
+          const systemPrompt = 'You are a security analyst for an enterprise identity platform. Analyze vault health data and give a 2-3 sentence security assessment with the most critical action item. Be direct and specific.';
+          const userMessage = `Vault: ${context.vaultHealth}\nAuth: ${context.authEvents}\nDevice: ${context.deviceData}\n\nProvide a concise security assessment.`;
+          const activeProvider = provider?.provider ?? 'anthropic';
+
+          let responseText = '';
+          if (activeProvider === 'anthropic') {
+            const model = provider!.model || 'claude-haiku-4-5-20251001';
+            const res = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'content-type': 'application/json' },
+              body: JSON.stringify({ model, max_tokens: 256, system: systemPrompt, messages: [{ role: 'user', content: userMessage }] }),
+            });
+            if (res.ok) { const d = await res.json(); responseText = d.content?.[0]?.text ?? ''; }
+          } else if (activeProvider === 'openai') {
+            const model = provider!.model || 'gpt-4o-mini';
+            const res = await fetch('https://api.openai.com/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${apiKey}`, 'content-type': 'application/json' },
+              body: JSON.stringify({ model, max_tokens: 256, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }] }),
+            });
+            if (res.ok) { const d = await res.json(); responseText = d.choices?.[0]?.message?.content ?? ''; }
+          } else if (activeProvider === 'gemini') {
+            const model = provider!.model || 'gemini-1.5-flash';
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ system_instruction: { parts: [{ text: systemPrompt }] }, contents: [{ role: 'user', parts: [{ text: userMessage }] }] }),
+            });
+            if (res.ok) { const d = await res.json(); responseText = d.candidates?.[0]?.content?.parts?.[0]?.text ?? ''; }
+          } else if (activeProvider === 'custom' && provider?.baseUrl) {
+            const res = await fetch(`${provider.baseUrl}/chat/completions`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${apiKey}`, 'content-type': 'application/json' },
+              body: JSON.stringify({ model: provider.model, max_tokens: 256, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }] }),
+            });
+            if (res.ok) { const d = await res.json(); responseText = d.choices?.[0]?.message?.content ?? ''; }
+          }
+
+          if (responseText) {
+            return { advice: responseText, riskScore: BigInt(baseRisk), confidence: BigInt(92) };
+          }
+        } catch { /* fall through to heuristic */ }
+      }
+
+      // Heuristic fallback (no API key or call failed)
+      let advice = '';
+      if (total === 0) {
+        advice = 'No vault entries found. Add credentials to receive a full security assessment.';
+      } else if (weak > 0 || old > 0) {
+        const issues: string[] = [];
+        if (weak > 0) issues.push(`${weak} weak password${weak !== 1 ? 's' : ''}`);
+        if (old > 0) issues.push(`${old} credential${old !== 1 ? 's' : ''} overdue for rotation`);
+        advice = `Found ${issues.join(' and ')} in your vault. Rotate weak credentials immediately and enable passkey authentication for critical accounts. Add an AI provider key in Settings → AI Coach for deeper analysis.`;
+      } else {
+        advice = `All ${total} vault entries meet basic requirements. Continue rotating credentials every 90 days and register a passkey for phishing-resistant authentication.`;
+      }
+      return { advice, riskScore: BigInt(baseRisk), confidence: BigInt(75) };
+    },
     enabled: !!context,
     staleTime: 5 * 60 * 1000,
   });

@@ -8,6 +8,7 @@ import { useGetRecommendations, useAutoApplyFix, useGetDashboardData } from './h
 import { AlertTriangle, Shield, Activity, Target, CheckCircle2, Zap, Clock, RefreshCw, Eye, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import type { SecurityRecommendation } from './backend';
+import { notificationStorage } from './lib/storage';
 
 type ScanStatus = 'idle' | 'scanning' | 'complete';
 
@@ -124,6 +125,11 @@ export default function ThreatAnalysis() {
     setLastScanTime(now);
     localStorage.setItem('nexus-last-scan-time', String(now.getTime()));
     toast.success(`Scan complete — ${activeRecs.length} issue${activeRecs.length !== 1 ? 's' : ''} found`);
+    notificationStorage.add({
+      title: 'Threat scan complete',
+      body: activeRecs.length === 0 ? 'No issues found — your vault is clean.' : `${activeRecs.length} security issue${activeRecs.length !== 1 ? 's' : ''} require attention.`,
+      type: activeRecs.length === 0 ? 'success' : activeRecs.some(r => r.severity === 'critical') ? 'security' : 'warning',
+    });
     setTimeout(() => setScanStatus('idle'), 3000);
   };
 

@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Users, UserPlus, Shield, Clock, Eye, Edit, Crown, Share2, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TeamMember } from './backend';
+import { roleRegistry } from './lib/storage';
 
 export default function TeamSharing() {
   const { data: teams } = useGetTeams();
@@ -60,30 +61,31 @@ export default function TeamSharing() {
       return;
     }
 
-    try {
-      const principalId = memberPrincipal.trim();
-      const member: TeamMember = {
-        principalId,
-        principal: principalId,
-        name: principalId,
-        email: principalId,
-        role: memberRole,
-        joinedAt: BigInt(Date.now() * 1000000),
-      };
+    const email = memberPrincipal.trim().toLowerCase();
+    // Look up registered user by email
+    const existing = roleRegistry.get(email);
+    const principalId = existing?.principalId ?? `nexus-ext-${btoa(email).replace(/[^a-z0-9]/gi, '').slice(0, 12)}`;
+    const displayName  = existing?.name ?? email;
 
-      addMember({ teamId: selectedTeam, member }, {
-        onSuccess: () => {
-          toast.success('Member added successfully');
-          setMemberPrincipal('');
-          setIsMemberDialogOpen(false);
-        },
-        onError: () => {
-          toast.error('Failed to add member');
-        },
-      });
-    } catch (error) {
-      toast.error('Invalid principal ID');
-    }
+    const member: TeamMember = {
+      principalId,
+      principal: principalId,
+      name: displayName,
+      email,
+      role: memberRole,
+      joinedAt: BigInt(Date.now()) * 1_000_000n,
+    };
+
+    addMember({ teamId: selectedTeam, member }, {
+      onSuccess: () => {
+        toast.success(`${displayName} added${existing ? '' : ' (pending — they must register to accept)'}`);
+        setMemberPrincipal('');
+        setIsMemberDialogOpen(false);
+      },
+      onError: () => {
+        toast.error('Failed to add member');
+      },
+    });
   };
 
   const handleShareEntry = () => {
@@ -370,9 +372,10 @@ export default function TeamSharing() {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Principal ID</Label>
+              <Label>Email Address</Label>
               <Input
-                placeholder="Enter principal ID"
+                placeholder="user@example.com"
+                type="email"
                 value={memberPrincipal}
                 onChange={(e) => setMemberPrincipal(e.target.value)}
                 disabled={isAddingMember}
@@ -442,7 +445,7 @@ function TeamCard({ team, onAddMember }: any) {
           <div key={idx} className="flex items-center gap-2 p-2 rounded-lg bg-background/50">
             <div className="flex items-center gap-2 flex-1 min-w-0">
               {getRoleIcon(member.role)}
-              <span className="text-xs font-mono truncate">{member.principal.toString().slice(0, 20)}...</span>
+              <span className="text-xs truncate">{member.name || member.email || member.principal?.toString().slice(0, 20)}</span>
             </div>
             <Badge variant="outline" className="text-xs">{member.role}</Badge>
           </div>

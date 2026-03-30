@@ -12,10 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   Settings, Bell, Shield, Smartphone, Key, Plug, Sparkles,
   CheckCircle2, Trash2, Eye, EyeOff, Copy, ExternalLink,
-  RefreshCw, AlertCircle, Lock,
+  RefreshCw, AlertCircle, Lock, User, Save,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { settings as appSettings, type AppSettings } from './lib/storage';
+import { settings as appSettings, type AppSettings, sessionStorage_, userRegistry, roleRegistry } from './lib/storage';
 import { loadPasskeys, deletePasskey } from './lib/webauthn';
 import { useInternetIdentity } from './hooks/useInternetIdentity';
 import { useQueryClient } from '@tanstack/react-query';
@@ -30,6 +30,7 @@ export default function SettingsPanel() {
   const [testingApi, setTestingApi] = useState(false);
   const [apiTestResult, setApiTestResult] = useState<'ok' | 'fail' | null>(null);
   const [passkeys, setPasskeys] = useState(() => loadPasskeys());
+  const [profileName, setProfileName] = useState(() => sessionStorage_.get()?.name ?? '');
   const [linkedDevices] = useState([
     { id: '1', name: 'MacBook Pro', type: 'macOS', lastActive: '2 hours ago',  trusted: true },
     { id: '2', name: 'iPhone 15 Pro', type: 'iOS',   lastActive: '1 day ago',   trusted: true },
@@ -141,6 +142,20 @@ export default function SettingsPanel() {
     }
   };
 
+  const saveProfile = () => {
+    const trimmed = profileName.trim();
+    if (!trimmed) { toast.error('Name cannot be empty'); return; }
+    const s = sessionStorage_.get();
+    if (!s) return;
+    const updated = { ...s, name: trimmed };
+    sessionStorage_.set(updated);
+    userRegistry.updateUser(s.principalId, { name: trimmed });
+    const reg = roleRegistry.get(s.email);
+    if (reg) roleRegistry.save({ ...reg, name: trimmed });
+    queryClient.invalidateQueries({ queryKey: ['currentUserProfile'] });
+    toast.success('Profile updated');
+  };
+
   const revokePasskey = (id: string, name: string) => {
     deletePasskey(id);
     setPasskeys(loadPasskeys());
@@ -169,8 +184,9 @@ export default function SettingsPanel() {
         </Card>
       )}
 
-      <Tabs defaultValue="notifications" className="space-y-6">
+      <Tabs defaultValue="profile" className="space-y-6">
         <TabsList className="glass-effect border border-border/40 flex-wrap gap-1">
+          <TabsTrigger value="profile"><User className="h-4 w-4 mr-2" />Profile</TabsTrigger>
           <TabsTrigger value="notifications"><Bell className="h-4 w-4 mr-2" />Notifications</TabsTrigger>
           <TabsTrigger value="security"><Shield className="h-4 w-4 mr-2" />Security</TabsTrigger>
           <TabsTrigger value="ai"><Sparkles className="h-4 w-4 mr-2" />AI Coach</TabsTrigger>
@@ -178,6 +194,62 @@ export default function SettingsPanel() {
           <TabsTrigger value="passkeys"><Key className="h-4 w-4 mr-2" />Passkeys</TabsTrigger>
           <TabsTrigger value="integrations"><Plug className="h-4 w-4 mr-2" />Integrations</TabsTrigger>
         </TabsList>
+
+        {/* ── Profile ── */}
+        <TabsContent value="profile" className="space-y-6">
+          <Card className="border-border/40 glass-strong shadow-depth-md">
+            <CardHeader>
+              <CardTitle>Profile</CardTitle>
+              <CardDescription>Update your display name. Email cannot be changed as it is tied to your identity.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="space-y-2">
+                <Label htmlFor="display-name">Display Name</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="display-name"
+                    value={profileName}
+                    onChange={e => setProfileName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && saveProfile()}
+                    placeholder="Your name"
+                    className="glass-effect"
+                  />
+                  <Button onClick={saveProfile} className="rounded-full btn-press shrink-0">
+                    <Save className="h-4 w-4 mr-2" />Save
+                  </Button>
+                </div>
+              </div>
+              {session && (
+                <>
+                  <div className="space-y-2">
+                    <Label>Email</Label>
+                    <Input value={session.email} disabled className="glass-effect opacity-60 cursor-not-allowed" />
+                    <p className="text-xs text-muted-foreground">Email is used as your identity key and cannot be changed.</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Role</Label>
+                      <p className="text-sm font-medium capitalize">{session.role}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Tier</Label>
+                      <p className="text-sm font-medium capitalize">{session.tier}</p>
+                    </div>
+                    <div className="space-y-1 col-span-2">
+                      <Label className="text-xs text-muted-foreground">Principal ID</Label>
+                      <div
+                        className="font-mono text-xs text-muted-foreground cursor-pointer hover:text-foreground flex items-center gap-1"
+                        onClick={() => { navigator.clipboard.writeText(session.principalId); toast.success('Principal ID copied'); }}
+                      >
+                        <Copy className="h-3 w-3" />{session.principalId}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* ── Notifications ── */}
         <TabsContent value="notifications" className="space-y-6">

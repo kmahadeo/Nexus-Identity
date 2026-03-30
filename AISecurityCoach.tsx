@@ -8,6 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Sparkles, AlertTriangle, CheckCircle2, Shield, Activity, Eye, Brain, Info, Loader2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import type { SecurityRecommendation, AIContext } from './backend';
+import { settings as appSettings } from './lib/storage';
 
 export default function AISecurityCoach() {
   const { data: vaultEntries, isLoading: vaultLoading } = useGetVaultEntries();
@@ -16,6 +17,14 @@ export default function AISecurityCoach() {
   const [aiContext, setAiContext] = useState<AIContext | null>(null);
   const { data: aiResponse, isLoading: aiLoading, refetch: refetchAI } = useGetAIRecommendationsQuery(aiContext);
   const [analysisProgress, setAnalysisProgress] = useState(0);
+  const activeProvider = appSettings.getActiveProvider();
+  const hasApiKey = !!(activeProvider?.apiKey);
+  const providerLabel = activeProvider ? ({
+    anthropic: 'Claude',
+    openai: 'OpenAI',
+    gemini: 'Gemini',
+    custom: 'Custom LLM',
+  }[activeProvider.provider] ?? activeProvider.provider) : null;
 
   // Prepare AI context whenever vault data changes
   useEffect(() => {
@@ -122,7 +131,7 @@ export default function AISecurityCoach() {
     if (aiContext) {
       refetchAI();
       toast.info('Refreshing AI analysis...', {
-        description: 'Fetching latest security recommendations from ChatAnywhere API',
+        description: 'Fetching latest security recommendations from Nexus AI Coach API',
       });
     }
   };
@@ -138,7 +147,7 @@ export default function AISecurityCoach() {
             <CardTitle className="text-lg">AI Security Coach</CardTitle>
             <CardDescription className="text-xs flex items-center gap-1">
               <Brain className="h-3 w-3" />
-              Powered by ChatAnywhere API • Real-time contextual analysis
+              {hasApiKey ? `Powered by ${providerLabel} • Real-time contextual analysis` : 'Add an API key in Settings → AI Coach to enable AI analysis'}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -163,12 +172,14 @@ export default function AISecurityCoach() {
       </CardHeader>
       <CardContent className="space-y-3">
         {/* AI Integration Status */}
-        <Alert className="border-primary/40 bg-primary/5">
-          <Info className="h-4 w-4 text-primary" />
-          <AlertTitle className="text-sm">AI Integration Active</AlertTitle>
+        <Alert className={`border-primary/40 ${hasApiKey ? 'bg-primary/5' : 'bg-warning/5 border-warning/40'}`}>
+          <Info className={`h-4 w-4 ${hasApiKey ? 'text-primary' : 'text-warning'}`} />
+          <AlertTitle className="text-sm">{hasApiKey ? `${providerLabel} Connected` : 'No AI Provider Configured'}</AlertTitle>
           <AlertDescription className="text-xs">
-            Connected to ChatAnywhere API (GPT-4o-ca) via backend AIClient. Context includes vault metadata, auth status, and device trust for actionable recommendations.
-            {aiResponse && (
+            {hasApiKey
+              ? `Analysing vault metadata, auth events, and device trust for personalised recommendations via ${providerLabel}.`
+              : 'Go to Settings → AI Coach to add an API key. Heuristic analysis is active in the meantime.'}
+            {aiResponse && Number(aiResponse.confidence) > 0 && (
               <div className="mt-2 flex items-center gap-2">
                 <span className="font-semibold">Risk Score: {Number(aiResponse.riskScore)}/100</span>
                 <span className="text-muted-foreground">•</span>
@@ -203,7 +214,7 @@ export default function AISecurityCoach() {
             <div className="mt-4 p-3 rounded-xl glass-effect border border-border/40">
               <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
                 <Eye className="h-3 w-3" />
-                <span>Continuous AI monitoring active via ChatAnywhere</span>
+                <span>Continuous AI monitoring active via Nexus AI Coach</span>
               </div>
             </div>
           </div>

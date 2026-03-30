@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -8,24 +8,75 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Bell, X, Shield, User, Sparkles, CreditCard, CheckCircle2, AlertTriangle, Info, Settings as SettingsIcon } from 'lucide-react';
 import { toast } from 'sonner';
-
-interface Notification {
-  id: string;
-  category: 'security' | 'account' | 'ai-insights' | 'billing';
-  title: string;
-  message: string;
-  timestamp: number;
-  read: boolean;
-  priority: 'high' | 'medium' | 'low';
-}
+import { notificationStorage, type NotificationItem, vaultStorage, sessionStorage_ } from './lib/storage';
+import { runThreatScan } from './hooks/useQueries';
 
 interface NotificationCenterProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+type Category = 'security' | 'account' | 'ai-insights' | 'billing';
+type Priority = 'high' | 'medium' | 'low';
+
+interface DisplayNotification {
+  id: string;
+  category: Category;
+  title: string;
+  message: string;
+  timestamp: number;
+  read: boolean;
+  priority: Priority;
+}
+
+function mapToDisplay(n: NotificationItem): DisplayNotification {
+  const categoryMap: Record<NotificationItem['type'], Category> = {
+    security: 'security',
+    warning:  'security',
+    info:     'account',
+    success:  'ai-insights',
+  };
+  const priorityMap: Record<NotificationItem['type'], Priority> = {
+    security: 'high',
+    warning:  'medium',
+    info:     'medium',
+    success:  'low',
+  };
+  return {
+    id:        n.id,
+    category:  categoryMap[n.type],
+    title:     n.title,
+    message:   n.body,
+    timestamp: n.createdAt,
+    read:      n.read,
+    priority:  priorityMap[n.type],
+  };
+}
+
+/** Seed one-time login notification and any vault threats if storage is empty */
+function seedInitialNotifications() {
+  const existing = notificationStorage.getAll();
+  if (existing.length > 0) return;
+
+  const session = sessionStorage_.get();
+  if (session) {
+    notificationStorage.add({
+      title: 'Login successful',
+      body: `Signed in as ${session.name} (${session.role})`,
+      type: 'info',
+    });
+  }
+
+  const entries = vaultStorage.getRaw();
+  const findings = runThreatScan(entries);
+  const critical = findings.filter(f => f.severity === 'critical' || f.severity === 'high');
+  critical.slice(0, 3).forEach(f => {
+    notificationStorage.add({ title: f.title, body: f.description, type: f.severity === 'critical' ? 'security' : 'warning' });
+  });
+}
+
 export default function NotificationCenter({ isOpen, onClose }: NotificationCenterProps) {
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<DisplayNotification[]>([]);
   const [preferences, setPreferences] = useState({
     security: true,
     account: true,
@@ -33,63 +84,32 @@ export default function NotificationCenter({ isOpen, onClose }: NotificationCent
     billing: true,
   });
 
-  // Initialize with sample notifications
-  useEffect(() => {
-    const sampleNotifications: Notification[] = [
-      {
-        id: '1',
-        category: 'security',
-        title: 'Weak Password Detected',
-        message: 'Your Gmail account password is weak. Consider strengthening it.',
-        timestamp: Date.now() - 3600000,
-        read: false,
-        priority: 'high',
-      },
-      {
-        id: '2',
-        category: 'ai-insights',
-        title: 'Security Score Improved',
-        message: 'Your security score increased by 5% after enabling MFA on 3 accounts.',
-        timestamp: Date.now() - 7200000,
-        read: false,
-        priority: 'medium',
-      },
-      {
-        id: '3',
-        category: 'account',
-        title: 'New Device Login',
-        message: 'A new device was used to access your account from San Francisco, CA.',
-        timestamp: Date.now() - 10800000,
-        read: true,
-        priority: 'medium',
-      },
-      {
-        id: '4',
-        category: 'security',
-        title: 'Passkey Registered',
-        message: 'Successfully registered a new passkey for MacBook Pro.',
-        timestamp: Date.now() - 14400000,
-        read: true,
-        priority: 'low',
-      },
-    ];
-    setNotifications(sampleNotifications);
+  const reload = useCallback(() => {
+    seedInitialNotifications();
+    setNotifications(notificationStorage.getAll().map(mapToDisplay));
   }, []);
+
+  useEffect(() => {
+    if (isOpen) reload();
+  }, [isOpen, reload]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const markAsRead = (id: string) => {
-    setNotifications(prev =>
-      prev.map(n => (n.id === id ? { ...n, read: true } : n))
-    );
+    notificationStorage.markRead(id);
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
   };
 
   const markAllAsRead = () => {
+    notificationStorage.markAllRead();
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     toast.success('All notifications marked as read');
   };
 
   const deleteNotification = (id: string) => {
+    // Remove from storage and local state
+    const all = notificationStorage.getAll().filter(n => n.id !== id);
+    try { localStorage.setItem('nexus-notifications', JSON.stringify(all)); } catch {}
     setNotifications(prev => prev.filter(n => n.id !== id));
     toast.success('Notification deleted');
   };
@@ -196,7 +216,7 @@ export default function NotificationCenter({ isOpen, onClose }: NotificationCent
               <TabsContent value="security" className="m-0 h-[calc(100%-60px)]">
                 <ScrollArea className="h-full">
                   <div className="p-4 space-y-3">
-                    {filterNotifications('security').map((notification) => (
+                    {filterNotifications('security').length > 0 ? filterNotifications('security').map((notification) => (
                       <NotificationCard
                         key={notification.id}
                         notification={notification}
@@ -205,7 +225,7 @@ export default function NotificationCenter({ isOpen, onClose }: NotificationCent
                         getCategoryIcon={getCategoryIcon}
                         getPriorityColor={getPriorityColor}
                       />
-                    ))}
+                    )) : <EmptyState />}
                   </div>
                 </ScrollArea>
               </TabsContent>
@@ -213,7 +233,7 @@ export default function NotificationCenter({ isOpen, onClose }: NotificationCent
               <TabsContent value="ai-insights" className="m-0 h-[calc(100%-60px)]">
                 <ScrollArea className="h-full">
                   <div className="p-4 space-y-3">
-                    {filterNotifications('ai-insights').map((notification) => (
+                    {filterNotifications('ai-insights').length > 0 ? filterNotifications('ai-insights').map((notification) => (
                       <NotificationCard
                         key={notification.id}
                         notification={notification}
@@ -222,7 +242,7 @@ export default function NotificationCenter({ isOpen, onClose }: NotificationCent
                         getCategoryIcon={getCategoryIcon}
                         getPriorityColor={getPriorityColor}
                       />
-                    ))}
+                    )) : <EmptyState />}
                   </div>
                 </ScrollArea>
               </TabsContent>
@@ -274,7 +294,13 @@ export default function NotificationCenter({ isOpen, onClose }: NotificationCent
   );
 }
 
-function NotificationCard({ notification, onMarkAsRead, onDelete, getCategoryIcon, getPriorityColor }: any) {
+function NotificationCard({ notification, onMarkAsRead, onDelete, getCategoryIcon, getPriorityColor }: {
+  notification: DisplayNotification;
+  onMarkAsRead: (id: string) => void;
+  onDelete: (id: string) => void;
+  getCategoryIcon: (cat: string) => React.ElementType;
+  getPriorityColor: (p: string) => string;
+}) {
   const Icon = getCategoryIcon(notification.category);
   const timeAgo = getTimeAgo(notification.timestamp);
 
@@ -295,7 +321,7 @@ function NotificationCard({ notification, onMarkAsRead, onDelete, getCategoryIco
           <div className="flex items-start justify-between gap-2 mb-1">
             <h4 className="font-semibold text-sm">{notification.title}</h4>
             {!notification.read && (
-              <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+              <div className="h-2 w-2 rounded-full bg-primary animate-pulse shrink-0" />
             )}
           </div>
           <p className="text-xs text-muted-foreground mb-2">{notification.message}</p>
@@ -333,7 +359,13 @@ function NotificationCard({ notification, onMarkAsRead, onDelete, getCategoryIco
   );
 }
 
-function PreferenceItem({ icon: Icon, label, description, checked, onChange }: any) {
+function PreferenceItem({ icon: Icon, label, description, checked, onChange }: {
+  icon: React.ElementType;
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
   return (
     <div className="flex items-center justify-between p-3 rounded-xl glass-effect border border-border/40">
       <div className="flex items-center gap-3">
@@ -358,7 +390,7 @@ function EmptyState() {
       </div>
       <h3 className="text-lg font-semibold mb-2">All caught up!</h3>
       <p className="text-sm text-muted-foreground max-w-md">
-        You have no new notifications. We'll notify you when something important happens.
+        No notifications in this category.
       </p>
     </div>
   );
