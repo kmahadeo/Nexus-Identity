@@ -276,10 +276,10 @@ export default function Integrations() {
             session={session}
             onSave={c => persist({ ...configs, duo: c })}
             onConnect={() => {
-              if (!configs.duo?.apiHostname || !configs.duo?.clientId || !configs.duo?.clientSecret || !configs.duo?.duoUsername) {
-                toast.error('Save your Duo configuration first (including Duo Username)'); return;
+              if (!configs.duo?.apiHostname || !configs.duo?.clientId || !configs.duo?.clientSecret) {
+                toast.error('Save your Duo configuration first'); return;
               }
-              duoInitiateAuth(configs.duo, configs.duo.duoUsername);
+              duoInitiateAuth(configs.duo);
             }}
             onDisconnect={() => disconnect('duo')}
           />
@@ -333,19 +333,18 @@ function DuoPanel({ config, token, session, onSave, onConnect, onDisconnect }: {
   onConnect: () => void;
   onDisconnect: () => void;
 }) {
-  const [hostname, setHostname]     = useState(config?.apiHostname ?? '');
-  const [clientId, setClientId]     = useState(config?.clientId ?? '');
-  const [secret, setSecret]         = useState(config?.clientSecret ?? '');
-  const [duoUsername, setDuoUsername] = useState(config?.duoUsername ?? session?.email ?? '');
-  const [saved, setSaved]           = useState(!!config?.clientId);
+  const [hostname, setHostname] = useState(config?.apiHostname ?? '');
+  const [clientId, setClientId] = useState(config?.clientId ?? '');
+  const [secret, setSecret]     = useState(config?.clientSecret ?? '');
+  const [saved, setSaved]       = useState(!!config?.clientId);
   const isConnected = tokenStorage.isValid('duo');
 
   const handleSave = () => {
-    if (!hostname.trim() || !clientId.trim() || !secret.trim() || !duoUsername.trim()) {
-      toast.error('All fields are required'); return;
+    if (!hostname.trim() || !clientId.trim() || !secret.trim()) {
+      toast.error('All three fields are required'); return;
     }
     const h = hostname.trim().replace(/^https?:\/\//i, '').replace(/\/.*/, '');
-    onSave({ apiHostname: h, clientId: clientId.trim(), clientSecret: secret.trim(), duoUsername: duoUsername.trim() });
+    onSave({ apiHostname: h, clientId: clientId.trim(), clientSecret: secret.trim() });
     setSaved(true);
     toast.success('Duo configuration saved — click "Authenticate with Duo" to test');
   };
@@ -439,20 +438,10 @@ function DuoPanel({ config, token, session, onSave, onConnect, onDisconnect }: {
               hint="Stored only in this browser's localStorage. Never sent to any server except Duo."
             />
 
-            <div className="space-y-1.5">
-              <Label className="text-sm">Duo Username</Label>
-              <Input
-                value={duoUsername} onChange={e => setDuoUsername(e.target.value)}
-                placeholder="your@email.com"
-                className="glass-effect font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground">Must match your username in the Duo Admin Panel (usually your email).</p>
-            </div>
-
             <div className="p-3 rounded-xl glass-effect border border-border/40 space-y-2">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Required Duo Application Settings</p>
               <div className="space-y-1 text-xs text-muted-foreground">
-                <p>• Application type: <span className="text-foreground font-mono">Web SDK</span></p>
+                <p>• Application type: <span className="text-foreground font-mono">Generic OIDC Relying Party</span></p>
                 <p>• Redirect URI: <span
                   className="text-primary font-mono cursor-pointer hover:underline"
                   onClick={() => { navigator.clipboard.writeText(window.location.origin + window.location.pathname); toast.success('Redirect URI copied'); }}>
@@ -495,13 +484,6 @@ function DuoPanel({ config, token, session, onSave, onConnect, onDisconnect }: {
                 </div>
               ))}
             </div>
-
-            {session?.email && (
-              <div className="p-2.5 rounded-lg glass-effect border border-border/40 text-xs">
-                <span className="text-muted-foreground">duo_uname will be pre-filled: </span>
-                <span className="font-mono text-primary">{session.email}</span>
-              </div>
-            )}
 
             {isConnected ? (
               <div className="space-y-2">

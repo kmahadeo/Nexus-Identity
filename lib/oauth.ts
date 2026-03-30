@@ -96,71 +96,39 @@ export function decodeJwtPayload(token: string): Record<string, unknown> | null 
   } catch { return null; }
 }
 
-/* ── Cisco Duo Universal Prompt ───────────────────────────────────────────── */
+/* ── Cisco Duo (Generic OIDC Relying Party) ───────────────────────────────── */
 
 export interface DuoConfig {
   apiHostname: string;   // api-XXXXXXXX.duosecurity.com
-  clientId: string;      // Integration Key (DI...)
-  clientSecret: string;  // Secret Key
-  duoUsername?: string;  // Username as it appears in Duo admin (email or alias)
+  clientId: string;      // Client ID from Duo admin
+  clientSecret: string;  // Client Secret from Duo admin
+  duoUsername?: string;  // Not used in OIDC flow — kept for display only
 }
 
 /**
- * Sign a JWT with HMAC-SHA512 (HS512) using browser-native crypto.subtle.
- * Duo Web SDK v4 requires the authorization request to be a signed JWT
- * passed as the `request` query parameter (JAR — RFC 9101).
+ * Generic OIDC Relying Party flow — standard PKCE, no signed JWT.
+ * Use "Generic OIDC Relying Party" application type in Duo Admin.
+ * The Web SDK type requires server-side JWT signing which can't be
+ * done securely from a browser.
  */
-async function signDuoJWT(payload: Record<string, unknown>, secret: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const toB64 = (obj: object) => base64url(encoder.encode(JSON.stringify(obj)));
-
-  const header = toB64({ alg: 'HS512', typ: 'JWT' });
-  const body   = toB64(payload);
-  const signingInput = `${header}.${body}`;
-
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-512' },
-    false,
-    ['sign'],
-  );
-  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(signingInput));
-  return `${signingInput}.${base64url(new Uint8Array(sig))}`;
-}
-
-export async function duoInitiateAuth(config: DuoConfig, username?: string): Promise<void> {
-  const verifier  = generateCodeVerifier();
-  const challenge = await generateCodeChallenge(verifier);
-  const state     = generateState();
+export async function duoInitiateAuth(config: DuoConfig): Promise<void> {
+  const verifier    = generateCodeVerifier();
+  const challenge   = await generateCodeChallenge(verifier);
+  const state       = generateState();
   const redirectUri = window.location.origin + window.location.pathname;
 
   pkceStorage.save({ provider: 'duo', state, codeVerifier: verifier, redirectUri, startedAt: Date.now() });
 
-  const now = Math.floor(Date.now() / 1000);
-  const duoUsername = config.duoUsername || username || '';
-
-  // Matches the official Duo Universal Python SDK JWT payload exactly.
-  // use_duo_code_attribute:false → Duo returns ?code= (not ?duo_code=) in callback.
-  const jwtPayload: Record<string, unknown> = {
-    scope: 'openid',
-    redirect_uri: redirectUri,
-    client_id: config.clientId,
-    iss: config.clientId,
-    aud: `https://${config.apiHostname}`,
-    exp: now + 300,
-    iat: now,
-    state,
+  const params = new URLSearchParams({
     response_type: 'code',
-    duo_uname: duoUsername,
-    use_duo_code_attribute: false,
+    client_id: config.clientId,
+    redirect_uri: redirectUri,
+    scope: 'openid',
+    state,
     code_challenge: challenge,
     code_challenge_method: 'S256',
-  };
+  });
 
-  const request = await signDuoJWT(jwtPayload, config.clientSecret);
-
-  const params = new URLSearchParams({ response_type: 'code', client_id: config.clientId, request });
   window.location.href = `https://${config.apiHostname}/oauth/v1/authorize?${params}`;
 }
 
