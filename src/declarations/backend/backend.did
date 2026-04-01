@@ -1,0 +1,184 @@
+type VaultEntry = 
+ record {
+   category: text;
+   createdAt: int;
+   encryptedData: text;
+   id: text;
+   name: text;
+   updatedAt: int;
+ };
+type UserRole = 
+ variant {
+   admin;
+   guest;
+   user;
+ };
+type UserProfile = 
+ record {
+   createdAt: int;
+   email: text;
+   lastLogin: int;
+   name: text;
+   tier: text;
+ };
+type UserDashboardData = 
+ record {
+   recentActivity: vec ActivityLogEntry;
+   recommendations: vec SecurityRecommendation;
+   securityScore: nat;
+ };
+type UserApprovalInfo = 
+ record {
+   "principal": principal;
+   status: ApprovalStatus;
+ };
+type TransformationOutput = 
+ record {
+   body: blob;
+   headers: vec HttpHeader;
+   status: nat;
+ };
+type TransformationInput = 
+ record {
+   context: blob;
+   response: HttpResponsePayload;
+ };
+type Time = int;
+type TeamMember = 
+ record {
+   addedAt: int;
+   "principal": principal;
+   role: text;
+ };
+type Team = 
+ record {
+   createdAt: int;
+   id: text;
+   members: vec TeamMember;
+   name: text;
+   owner: principal;
+ };
+type SharedVaultEntry = 
+ record {
+   entry: VaultEntry;
+   permissions: vec text;
+   sharedAt: int;
+   sharedWith: vec principal;
+ };
+type SecurityRecommendation = 
+ record {
+   id: text;
+   message: text;
+   priority: nat;
+ };
+type RSVP = 
+ record {
+   attending: bool;
+   inviteCode: text;
+   name: text;
+   timestamp: Time;
+ };
+type PasskeyCredential = 
+ record {
+   createdAt: int;
+   credentialId: text;
+   deviceName: text;
+   lastUsed: int;
+   publicKeyHint: text;
+   transports: vec text;
+ };
+type InviteCode = 
+ record {
+   code: text;
+   created: Time;
+   used: bool;
+ };
+type HttpResponsePayload = 
+ record {
+   body: blob;
+   headers: vec HttpHeader;
+   status: nat;
+ };
+type HttpHeader = 
+ record {
+   name: text;
+   value: text;
+ };
+type FileReference = 
+ record {
+   "blob": ExternalBlob;
+   id: text;
+   name: text;
+   uploadedAt: int;
+ };
+type ExternalBlob = 
+ record {
+   contentType: text;
+   id: text;
+   size: nat;
+   url: text;
+ };
+type ApprovalStatus = 
+ variant {
+   approved;
+   pending;
+   rejected;
+ };
+type ActivityLogEntry = 
+ record {
+   action: text;
+   details: text;
+   timestamp: int;
+ };
+type AIResponse = 
+ record {
+   advice: text;
+   confidence: nat;
+   riskScore: nat;
+ };
+type AIContext = 
+ record {
+   authEvents: text;
+   deviceData: text;
+   vaultHealth: text;
+ };
+service : {
+  addFileReference: (FileReference) -> ();
+  addPasskeyCredential: (PasskeyCredential) -> ();
+  addRecommendation: (SecurityRecommendation) -> ();
+  addTeamMember: (text, TeamMember) -> ();
+  addVaultEntry: (VaultEntry) -> ();
+  assignCallerUserRole: (principal, UserRole) -> ();
+  createTeam: (text) -> (text);
+  deletePasskeyCredential: (text) -> ();
+  deleteVaultEntry: (text) -> ();
+  generateInviteCode: () -> (text);
+  getAIRecommendations: (AIContext) -> (AIResponse);
+  getAllRSVPs: () -> (vec RSVP) query;
+  getCallerUserProfile: () -> (opt UserProfile) query;
+  getCallerUserRole: () -> (UserRole) query;
+  getDashboardData: () -> (UserDashboardData) query;
+  getFileReferences: () -> (vec FileReference) query;
+  getInviteCodes: () -> (vec InviteCode) query;
+  getPasskeyCount: () -> (nat) query;
+  getPasskeyCredentials: () -> (vec PasskeyCredential) query;
+  getRecentActivity: () -> (vec ActivityLogEntry) query;
+  getRecommendations: () -> (vec SecurityRecommendation) query;
+  getSharedVaultEntries: () -> (vec SharedVaultEntry) query;
+  getTeams: () -> (vec Team) query;
+  getUserProfile: (principal) -> (opt UserProfile) query;
+  getVaultEntries: () -> (vec VaultEntry) query;
+  initializeAccessControl: () -> ();
+  isCallerAdmin: () -> (bool) query;
+  isCallerApproved: () -> (bool) query;
+  listApprovals: () -> (vec UserApprovalInfo) query;
+  logActivity: (text, text) -> ();
+  makeGetOutcall: (text) -> (text);
+  requestApproval: () -> ();
+  saveCallerUserProfile: (UserProfile) -> ();
+  setApproval: (principal, ApprovalStatus) -> ();
+  shareVaultEntry: (VaultEntry, vec principal, vec text) -> ();
+  submitRSVP: (text, bool, text) -> ();
+  transform: (TransformationInput) -> (TransformationOutput) query;
+  updateVaultEntry: (VaultEntry) -> ();
+}

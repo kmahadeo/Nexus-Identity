@@ -51,8 +51,19 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('.', import.meta.url)),
+      // Real @dfinity/principal is now installed — stub no longer needed
       '@icp-sdk/core/principal': fileURLToPath(new URL('./icp-principal-stub.ts', import.meta.url)),
     },
+  },
+  define: {
+    // Inject canister IDs so useActor.ts can read them as import.meta.env
+    'import.meta.env.VITE_CANISTER_ID_BACKEND':
+      JSON.stringify(process.env.CANISTER_ID_BACKEND ?? 'bkyz2-fmaaa-aaaaa-qaaaq-cai'),
+    'import.meta.env.VITE_INTERNET_IDENTITY_URL':
+      JSON.stringify(
+        process.env.INTERNET_IDENTITY_URL ??
+        'http://rdmx6-jaaaa-aaaaa-aaadq-cai.localhost:4943/'
+      ),
   },
   server: {
     port: 5173,
