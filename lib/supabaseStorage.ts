@@ -184,7 +184,7 @@ export const vaultDB = {
             role: session.role || 'individual',
             tier: session.tier || 'individual',
             is_active: true, mfa_enabled: false, passkeys_count: 0, vault_count: 0,
-          }).catch(() => {});
+          });
         }
       }
 

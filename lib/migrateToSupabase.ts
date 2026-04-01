@@ -93,7 +93,7 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
             category: entry.category || 'password',
             tags: entry.tags || [],
             notes: entry.notes || '',
-          }, { onConflict: 'id', ignoreDuplicates: true }).catch(() => {});
+          }, { onConflict: 'id', ignoreDuplicates: true });
           vaultCount++;
         }
       }
@@ -151,7 +151,7 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
           name: member.name || '',
           email: member.email || '',
           role: member.role || 'view',
-        }, { onConflict: 'id', ignoreDuplicates: true }).catch(() => {});
+        }, { onConflict: 'id', ignoreDuplicates: true });
       }
     }
     if (teams.length > 0) migrated.push(`teams: ${teams.length}`);
@@ -192,7 +192,7 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
             app: cred.app || 'google',
             secret: cred.secret,
             verified: cred.verified ?? false,
-          }, { onConflict: 'id', ignoreDuplicates: true }).catch(() => {});
+          }, { onConflict: 'id', ignoreDuplicates: true });
           totpCount++;
         }
       }
@@ -216,7 +216,7 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
         status: k.status || 'active',
         firmware: k.firmware || null,
         protocols: k.protocols || ['fido2', 'u2f'],
-      }, { onConflict: 'id', ignoreDuplicates: true }).catch(() => {});
+      }, { onConflict: 'id', ignoreDuplicates: true });
     }
     if (keys.length > 0) migrated.push(`hardware_keys: ${keys.length}`);
   } catch (e) { errors.push(`hardware_keys: ${e}`); }
@@ -235,7 +235,7 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
         requester_email: r.requesterEmail || '',
         requester_name: r.requesterName || '',
         admin_notes: r.adminNotes || null,
-      }, { onConflict: 'id', ignoreDuplicates: true }).catch(() => {});
+      }, { onConflict: 'id', ignoreDuplicates: true });
     }
     if (requests.length > 0) migrated.push(`help_requests: ${requests.length}`);
   } catch (e) { errors.push(`help_requests: ${e}`); }
@@ -254,7 +254,7 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
         details: e.details || '',
         ip_address: e.ipAddress || '127.0.0.1',
         result: e.result || 'success',
-      }).catch(() => {});
+      });
     }
     if (events.length > 0) migrated.push(`audit_log: ${events.length}`);
   } catch (e) { errors.push(`audit_log: ${e}`); }
@@ -278,7 +278,7 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
         total_users: c.config?.totalUsers || 0,
         total_groups: c.config?.totalGroups || 0,
         created_by: session?.principalId || 'system',
-      }, { onConflict: 'id' }).catch(() => {});
+      }, { onConflict: 'id' });
     }
     if (conns.length > 0) migrated.push(`directory_connections: ${conns.length}`);
   } catch (e) { errors.push(`directory_connections: ${e}`); }

@@ -433,4 +433,8 @@ export const notificationStorage = {
     const key = notifKey();
     lsSet(key, ls<NotificationItem[]>(key, []).map(n => ({ ...n, read: true })));
   },
+  delete(id: string): void {
+    const key = notifKey();
+    lsSet(key, ls<NotificationItem[]>(key, []).filter(n => n.id !== id));
+  },
 };

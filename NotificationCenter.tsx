@@ -107,9 +107,8 @@ export default function NotificationCenter({ isOpen, onClose }: NotificationCent
   };
 
   const deleteNotification = (id: string) => {
-    // Remove from storage and local state
-    const all = notificationStorage.getAll().filter(n => n.id !== id);
-    try { localStorage.setItem('nexus-notifications', JSON.stringify(all)); } catch {}
+    // Remove from storage (uses user-scoped key) and local state
+    notificationStorage.delete(id);
     setNotifications(prev => prev.filter(n => n.id !== id));
     toast.success('Notification deleted');
   };

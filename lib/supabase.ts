@@ -52,13 +52,9 @@ export async function setCurrentPrincipal(principalId: string): Promise<void> {
   if (!client) return;
   // Set the principal_id in the session's Postgres settings
   // This is used by RLS policies: current_setting('app.current_principal_id')
-  await client.rpc('set_config', {
-    setting_name: 'app.current_principal_id',
-    setting_value: principalId,
-  }).catch(() => {
-    // Fallback: some Supabase configurations don't support set_config RPC
-    // RLS will still work if we pass principal_id in queries
-  });
+  // RLS is currently permissive for beta — this function is a no-op
+  // When strict RLS is enabled, implement set_config via a Postgres function
+  void principalId;
 }
 
 export type { SupabaseClient };

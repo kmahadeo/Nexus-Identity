@@ -219,12 +219,12 @@ export function useAddVaultEntry() {
           action: 'vault.entry.created', actor_id: session.principalId,
           actor_email: session.email, actor_role: session.role,
           details: `Added ${entry.category}: ${entry.name}`, result: 'success',
-        }).catch((e) => console.error("[SB]", e));
+        });
         profilesDB.upsert({
           principal_id: session.principalId, email: session.email, name: session.name,
           role: session.role, tier: session.tier, is_active: true, mfa_enabled: false,
           passkeys_count: 0, vault_count: vaultStorage.getRaw().length,
-        }).catch((e) => console.error("[SB]", e));
+        });
       }
       return entry;
     },
@@ -262,14 +262,14 @@ export function useDeleteVaultEntry() {
       }
       vaultStorage.delete(id);
       // Sync to Supabase
-      vaultDB.delete(id).catch((e) => console.error("[SB]", e));
+      vaultDB.delete(id);
       if (session) {
         auditDB.log({
           action: 'vault.entry.deleted', actor_id: session.principalId,
           actor_email: session.email, actor_role: session.role,
           resource_id: id, resource_type: 'vault_entry',
           details: `Deleted vault entry ${id}`, result: 'success',
-        }).catch((e) => console.error("[SB]", e));
+        });
       }
     },
     onSuccess: () => {
@@ -289,7 +289,7 @@ export function useLogActivity() {
           action: event.action, actor_id: session.principalId,
           actor_email: session.email, actor_role: session.role,
           details: event.details, result: 'success',
-        }).catch((e) => console.error("[SB]", e));
+        });
       }
     },
   });
@@ -376,16 +376,16 @@ export function useCreateTeam() {
       if (isSupabaseConfigured()) {
         const client = getSupabase();
         if (client) {
-          client.from('teams').insert({
+          await client.from('teams').insert({
             id: team.id, name: team.name, created_by: session.principalId,
-          }).catch((e) => console.error("[SB]", e));
+          });
         }
       }
       auditDB.log({
         action: 'team.created', actor_id: session.principalId,
         actor_email: session.email, actor_role: session.role,
         details: `Created team: ${name}`, result: 'success',
-      }).catch((e) => console.error("[SB]", e));
+      });
       return team;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['teams'] }),
@@ -408,17 +408,17 @@ export function useAddTeamMember() {
       if (isSupabaseConfigured()) {
         const client = getSupabase();
         if (client) {
-          client.from('team_members').insert({
+          await client.from('team_members').insert({
             team_id: teamId, principal_id: member.principalId || member.principal,
             name: member.name, email: member.email, role: member.role,
-          }).catch((e) => console.error("[SB]", e));
+          });
         }
       }
       auditDB.log({
         action: 'team.member_added', actor_id: session.principalId,
         actor_email: session.email, actor_role: session.role,
         resource_id: teamId, details: `Added ${member.name} to team`, result: 'success',
-      }).catch((e) => console.error("[SB]", e));
+      });
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['teams'] }),
   });
@@ -456,8 +456,8 @@ export function useRemoveTeamMember() {
       if (isSupabaseConfigured()) {
         const client = getSupabase();
         if (client) {
-          client.from('team_members').delete()
-            .eq('team_id', teamId).eq('principal_id', principalId).catch((e) => console.error("[SB]", e));
+          await client.from('team_members').delete()
+            .eq('team_id', teamId).eq('principal_id', principalId);
         }
       }
     },
@@ -478,7 +478,7 @@ export function useDeleteTeam() {
       if (isSupabaseConfigured()) {
         const client = getSupabase();
         if (client) {
-          client.from('teams').delete().eq('id', teamId).catch((e) => console.error("[SB]", e));
+          await client.from('teams').delete().eq('id', teamId);
         }
       }
     },
@@ -558,7 +558,7 @@ export function useTogglePolicy() {
       policyStorage.toggle(id);
       // Sync to Supabase
       if (currentState) {
-        policiesDB.toggle(id, !currentState.enabled).catch((e) => console.error("[SB]", e));
+        policiesDB.toggle(id, !currentState.enabled);
       }
       if (session) {
         auditDB.log({
@@ -567,7 +567,7 @@ export function useTogglePolicy() {
           resource_id: id, resource_type: 'policy',
           details: `Policy ${currentState?.name ?? id} ${currentState?.enabled ? 'disabled' : 'enabled'}`,
           result: 'success',
-        }).catch((e) => console.error("[SB]", e));
+        });
       }
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['policies'] }),
@@ -584,12 +584,12 @@ export function useAddPolicy() {
       }
       policyStorage.add(policy);
       // Sync to Supabase
-      policiesDB.add({ ...policy, created_by: session.principalId }).catch((e) => console.error("[SB]", e));
+      policiesDB.add({ ...policy, created_by: session.principalId });
       auditDB.log({
         action: 'policy.created', actor_id: session.principalId,
         actor_email: session.email, actor_role: session.role,
         details: `Created policy: ${policy.name}`, result: 'success',
-      }).catch((e) => console.error("[SB]", e));
+      });
       return policy;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['policies'] }),
@@ -628,14 +628,14 @@ export function useDeactivateUser() {
       }
       userRegistry.deactivate(principalId);
       // Sync to Supabase
-      profilesDB.deactivate(principalId).catch((e) => console.error("[SB]", e));
+      profilesDB.deactivate(principalId);
       if (session) {
         auditDB.log({
           action: 'user.deactivated', actor_id: session.principalId,
           actor_email: session.email, actor_role: session.role,
           resource_id: principalId, resource_type: 'user',
           details: `Deactivated user ${principalId}`, result: 'success',
-        }).catch((e) => console.error("[SB]", e));
+        });
       }
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['allUsers'] }),

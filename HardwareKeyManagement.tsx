@@ -74,7 +74,7 @@ async function syncAllHardwareKeysToSupabase(keys: HardwareKey[]) {
         status: key.status, firmware: key.firmware || null,
         protocols: key.protocols || ['fido2', 'u2f'],
         status_changed_at: key.statusChangedAt ? new Date(key.statusChangedAt).toISOString() : null,
-      }, { onConflict: 'id' }).catch((e) => console.error("[SB]", e));
+      }, { onConflict: 'id' }).then(({ error: e }) => { if (e) console.error("[SB]", e); });
     }
   } catch(e) { console.error("[SB]", e); }
 }
