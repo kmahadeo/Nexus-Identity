@@ -1,118 +1,141 @@
-Overview
+# Nexus Identity
 
-Nexus Identity is a production-grade intelligent identity platform that provides an autonomous, self-adapting identity and security layer. It integrates verified production APIs across authentication, credential management, enterprise identity, MFA, SIEM, and AI-driven security intelligence.
+Passwordless identity and access management platform with zero-trust architecture, enterprise directory sync, and post-quantum cryptography readiness.
 
-The platform combines real WebAuthn/FIDO2 authentication, enterprise IdP federation, encrypted vault management, AI-driven threat analysis, and adaptive UX into a single cohesive system. All integrations use live APIs with no synthetic or placeholder data.
+## Quick Start
 
-The interface follows a calm, minimal, futuristic 2.5D design system with adaptive cognitive UX, depth-based motion, and state-aware visual feedback.
+```bash
+# Install dependencies
+npm install
 
+# Copy environment template and add your Supabase credentials
+cp .env.example .env.local
 
-Core Capabilities
+# Start development server
+npm run dev
+```
 
-AI Security Coach & Autonomous Context Engine
-	•	Context-aware AI system monitoring authentication events, vault health, user behavior, device trust, and team activity
-	•	Real-time anomaly detection, predictive breach analysis, and automated remediation
-	•	Persistent AI session memory with contextual explanations and confidence scoring
-	•	One-click remediation actions including password rotation, policy updates, and access fixes
-	•	Embedded AI chat interface with session-level context and action execution
-	•	Dedicated backend AIClient service handling context preparation, API communication, and response logging
+Open [http://localhost:5173](http://localhost:5173)
 
+## Architecture
 
-Production Authentication & Identity
-	•	Full WebAuthn / FIDO2 implementation with device attestation and metadata validation
-	•	Passkeys with cross-device sync via enterprise identity providers
-	•	Biometric authentication using platform-native APIs
-	•	Multi-factor authentication via hardware and biometric providers
-	•	Risk-based adaptive authentication with AI-driven analysis
-	•	OAuth2 authorization with real provider redirects and token validation
-	•	Session management with AES-256-GCM encryption and adaptive risk controls
+```
+├── lib/                    # Core libraries
+│   ├── supabase.ts         # Supabase client (persistent backend)
+│   ├── supabaseStorage.ts  # Data layer (Supabase + localStorage fallback)
+│   ├── migrateToSupabase.ts# One-time localStorage → Supabase migration
+│   ├── webauthn.ts         # FIDO2/WebAuthn passkey management
+│   ├── totp.ts             # RFC 6238 TOTP implementation
+│   ├── crypto.ts           # AES-256-GCM encryption (Web Crypto API)
+│   ├── vaultCrypto.ts      # Vault-specific encryption layer
+│   ├── pqcCrypto.ts        # Post-quantum crypto agility layer
+│   ├── permissions.ts      # RBAC + JIT access + conditional access + break-glass
+│   ├── auditLog.ts         # Security event logging
+│   ├── storage.ts          # localStorage helpers (user-scoped)
+│   ├── oauth.ts            # OAuth2 PKCE flows
+│   ├── ssoConfig.ts        # Google/Apple SSO configuration
+│   ├── stripe.ts           # Stripe billing integration
+│   ├── directorySync.ts    # SCIM 2.0 directory sync engine
+│   ├── helpRequests.ts     # Support ticket system
+│   ├── verifiableCredentials.ts # W3C Verifiable Credentials
+│   ├── demoMode.ts         # Demo mode with seed data
+│   └── logger.ts           # Production-safe logging
+├── hooks/                  # React hooks
+│   ├── useInternetIdentity.tsx # Auth context + session management
+│   └── useQueries.ts       # Data hooks (React Query + Supabase sync)
+├── supabase/
+│   └── migrations/         # Database schema (run in Supabase SQL Editor)
+├── components/ui/          # Shadcn/Radix UI components
+└── [Page].tsx              # Page components
+```
 
+## Features
 
-Encrypted Vault & Credential Intelligence
-	•	Encrypted vault synchronization via secure Connect APIs
-	•	Real-time audit trails and event streaming
-	•	Continuous credential health analysis and breach detection
-	•	Automated password rotation with risk-based scheduling
-	•	Intelligent credential categorization and access controls
-	•	Advanced sharing with permissions, audit trails, and revocation
+### Authentication
+- **Passkeys (FIDO2/WebAuthn)** — phishing-proof, device-bound credentials
+- **TOTP MFA** — Google Authenticator, Microsoft Authenticator, Duo, Okta Verify
+- **Google SSO** — OAuth2 implicit flow (client-side, no backend needed)
+- **Apple SSO** — configuration ready (requires Apple Developer account)
+- **Liveness detection** — camera-based motion analysis for biometric verification
 
+### Vault
+- **AES-256-GCM encryption** — client-side, zero-knowledge
+- **Passkey/TOTP gate** — re-verification required after 30-minute session timeout
+- **Password generator** — cryptographically random via Web Crypto API
+- **Threat scanning** — 8 detection rules (weak passwords, credential reuse, rotation, HTTP URLs, common passwords)
 
-Developer Platform & SDKs
-	•	REST and GraphQL APIs for authentication, vaults, AI insights, and team management
-	•	Production SDKs for TypeScript, Swift, and Kotlin
-	•	Webhooks for real-time security and identity events
-	•	Rate limiting, API key management, and usage analytics
-	•	Developer portal with documentation, examples, and integration guides
+### Enterprise
+- **User management** — directory with roles, MFA status, compliance tracking
+- **Security policies** — password, MFA, session, vault, access enforcement (advisory/warn/block)
+- **Directory sync** — SCIM 2.0 connectors for Entra ID, Okta, Cisco Duo, Workday, Google Workspace
+- **Hardware key inventory** — AAGUID auto-detection, lifecycle management, bulk import
+- **Session management** — active sessions, force-terminate
+- **Conditional access** — device trust, MFA requirements, session age rules
+- **Break-glass emergency access** — time-limited admin override, rate-limited, fully audited
+- **Audit logging** — every operation logged with actor, resource, result
 
+### Security
+- **RBAC** — 5 roles (admin, individual, team, contractor, guest) with 24 permissions
+- **JIT access** — time-boxed permission grants
+- **Post-quantum readiness** — crypto-agile architecture with algorithm-tagged payloads
+- **Data isolation** — all user data scoped by principalId
+- **Error boundaries** — graceful error handling on every page
 
-Admin Intelligence & SIEM
-	•	Security heatmaps and organizational risk analysis
-	•	Real-time event streaming into enterprise SIEM platforms
-	•	AI-generated security policies based on organizational behavior
-	•	Automated remediation workflows
-	•	Compliance monitoring for SOC2, ISO27001, GDPR, and related frameworks
-	•	Executive-level risk reporting and audit readiness
+### Billing
+- **5 pricing tiers** — Free, Individual ($8), Teams ($25), Business ($79), Enterprise (custom)
+- **Stripe integration ready** — checkout, customer portal, invoice history
+- **Demo mode** — full platform access for evaluation (passphrase: see INTEGRATION-SETUP.md)
 
+## Backend
 
-Federated & Decentralized Identity
-	•	Federation across enterprise identity providers with live synchronization
-	•	Cross-platform identity portability and trust networks
-	•	Web3 decentralized identity and verifiable credentials
-	•	Privacy-preserving authentication and user-controlled data sovereignty
+**Supabase** (PostgreSQL) — 13 tables with row-level security:
 
+| Table | Purpose |
+|-------|---------|
+| profiles | User directory |
+| vault_entries | Encrypted credentials |
+| passkeys | FIDO2 credentials |
+| teams / team_members | Team management |
+| shared_vault_entries | Shared credentials |
+| security_policies | Enforced policies |
+| audit_log | Security events |
+| hardware_keys | FIDO2 key inventory |
+| totp_credentials | Authenticator secrets |
+| help_requests | Support tickets |
+| directory_connections | SCIM directory configs |
+| active_sessions | Session management |
 
-Adaptive Cognitive UX
-	•	Interface adapts to user behavior and role context
-	•	Depth-based motion and ambient lighting tied to system state
-	•	Minimal cognitive load with contextual surfacing
-	•	High-refresh responsiveness and motion consistency
-	•	Optional cinematic mode for demonstrations and presentations
+## Environment Variables
 
+```bash
+# Required
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
+```
 
-Edge Computing & Local AI
-	•	Local encryption and offline operation
-	•	On-device AI inference for privacy-sensitive analysis
-	•	Hybrid cloud-edge architecture with regional data residency
-	•	Distributed processing across devices and cloud infrastructure
+See [INTEGRATION-SETUP.md](INTEGRATION-SETUP.md) for Stripe, Apple SSO, Okta, Entra ID, and email service setup.
 
+## Deployment
 
-Team & Organization Management
-	•	Role-based access control with inheritance and overrides
-	•	Automated user provisioning and deprovisioning
-	•	Secure credential sharing with time-bound access
-	•	Team security scoring and behavioral analytics
-	•	Multi-organization and multi-tenant support
+```bash
+# Build for production
+npm run build
 
+# Deploy to Cloudflare Pages
+npx wrangler pages deploy dist
 
-Backend & Data Storage
-	•	Encrypted storage with AES-256-GCM
-	•	Secure storage of authentication credentials, vault metadata, AI logs, and audit trails
-	•	Real-time security event logging and compliance records
-	•	Federated identity mappings and device trust metrics
-	•	Webhook and polling infrastructure for live synchronization
-	•	Tokenization and region-based data residency controls
+# Or deploy to Vercel
+npx vercel --prod
+```
 
+## Security
 
-Backend Operations
-	•	Dedicated AIClient service handling AI context formatting and response processing
-	•	Real-time device attestation and authentication verification
-	•	Secure API communication with HMAC/JWT validation
-	•	OAuth2 callback handling and token lifecycle management
-	•	Event-driven architecture with hooks, listeners, and background workers
-	•	Automated remediation execution through integrated provider APIs
-	•	Continuous monitoring with no mock or synthetic data paths
+- All secrets stored in `.env.local` (gitignored)
+- No credentials hardcoded in source code
+- Supabase anon key is safe for client-side use (RLS enforces access control)
+- AES-256-GCM encryption is quantum-safe (128-bit effective strength post-quantum)
+- WebAuthn signatures (ECDSA P-256) will migrate to PQC when FIDO standards update
 
+## License
 
-Technical Architecture
-	•	Verified production API integrations across identity, security, and AI
-	•	Autonomous Context Engine for real-time intelligence and decisioning
-	•	Serverless and edge-deployed architecture
-	•	Production-ready WebAuthn/FIDO2 compliance
-	•	Multi-tenant policy architecture with inheritance
-	•	Comprehensive audit trails and compliance automation
-	•	Secure environment variable management for all credentials
-
-
-Content Language
-
-All application content and interface text is in English.
+Proprietary. All rights reserved.
