@@ -1,14 +1,17 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { useGetRecommendations, useAutoApplyFix, useGetDashboardData } from './hooks/useQueries';
-import { AlertTriangle, Shield, Activity, Target, CheckCircle2, Zap, Clock, RefreshCw, Eye, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
+import { useGetRecommendations, useAutoApplyFix, useGetDashboardData, useGetVaultEntries, runThreatScan } from './hooks/useQueries';
+import { vaultStorage, notificationStorage } from './lib/storage';
+import { AlertTriangle, Shield, Activity, Target, CheckCircle2, Zap, Clock, RefreshCw, Eye, ChevronDown, ChevronUp, Sparkles, Plus } from 'lucide-react';
+import { PinButton } from './CustomDashboard';
+import { useInternetIdentity } from './hooks/useInternetIdentity';
 import { toast } from 'sonner';
 import type { SecurityRecommendation } from './backend';
-import { notificationStorage } from './lib/storage';
 
 type ScanStatus = 'idle' | 'scanning' | 'complete';
 
@@ -88,24 +91,33 @@ function ThreatCard({ rec, onFix }: { rec: SecurityRecommendation; onFix: (rec: 
 }
 
 export default function ThreatAnalysis() {
+  const { session: iiSession } = useInternetIdentity();
+  const queryClient = useQueryClient();
   const { data: recommendations, isLoading } = useGetRecommendations();
   const { data: dashboardData } = useGetDashboardData();
+  const { data: vaultEntries } = useGetVaultEntries();
   const { mutate: autoApplyFix, isPending: isFixing } = useAutoApplyFix();
 
   const [scanStatus, setScanStatus] = useState<ScanStatus>('idle');
   const [scanProgress, setScanProgress] = useState(0);
   const [fixingId, setFixingId] = useState<string | null>(null);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+  const [scanResults, setScanResults] = useState<SecurityRecommendation[] | null>(null);
   const [lastScanTime, setLastScanTime] = useState<Date | null>(() => {
-    const stored = localStorage.getItem('nexus-last-scan-time');
+    const stored = localStorage.getItem('nexus-last-scan-time-' + (JSON.parse(localStorage.getItem('nexus-session') ?? '{}')?.principalId ?? 'default'));
     return stored ? new Date(Number(stored)) : null;
   });
 
-  const activeRecs = recommendations?.filter(r => !dismissedIds.has(r.id)) || [];
+  // Use scan results if available (fresh scan), otherwise fall back to query data
+  const baseRecs = scanResults ?? recommendations ?? [];
+  const activeRecs = baseRecs.filter(r => !dismissedIds.has(r.id));
   const critical = activeRecs.filter(r => r.severity === 'critical').length;
   const high = activeRecs.filter(r => r.severity === 'high').length;
   const medium = activeRecs.filter(r => r.severity === 'medium').length;
   const low = activeRecs.filter(r => r.severity === 'low').length;
+  // Check both the hook data and raw storage to avoid false negatives on first render
+  const vaultCount = vaultEntries?.length ?? vaultStorage.getRaw().length;
+  const hasVaultEntries = vaultCount > 0;
 
   const sortedRecs = [...activeRecs].sort((a, b) => {
     const pa = SEVERITY_CONFIG[a.severity]?.priority || 0;
@@ -116,20 +128,43 @@ export default function ThreatAnalysis() {
   const handleRunScan = async () => {
     setScanStatus('scanning');
     setScanProgress(0);
+
+    // Run the actual threat scan on current vault entries immediately.
+    // Fall back to reading storage directly if the React Query hook hasn't resolved yet (race condition).
+    const entries = vaultEntries && vaultEntries.length > 0 ? vaultEntries : vaultStorage.getRaw();
+    const findings = runThreatScan(entries);
+    const freshRecs: SecurityRecommendation[] = findings.map((f, i) => ({
+      id: f.id, title: f.title, message: f.description, description: f.description,
+      severity: f.severity, priority: f.priority, category: f.category, actionable: f.actionable,
+      createdAt: BigInt(i),
+    })) as SecurityRecommendation[];
+
+    // Animate progress bar while scan runs
     for (let i = 0; i <= 100; i += 10) {
       await new Promise(r => setTimeout(r, 180));
       setScanProgress(i);
     }
+
+    // Set fresh results immediately so metric cards update
+    setScanResults(freshRecs);
     setScanStatus('complete');
     const now = new Date();
     setLastScanTime(now);
-    localStorage.setItem('nexus-last-scan-time', String(now.getTime()));
-    toast.success(`Scan complete — ${activeRecs.length} issue${activeRecs.length !== 1 ? 's' : ''} found`);
+    localStorage.setItem('nexus-last-scan-time-' + (JSON.parse(localStorage.getItem('nexus-session') ?? '{}')?.principalId ?? 'default'), String(now.getTime()));
+
+    // Compute counts from fresh scan for accurate toast
+    const freshActive = freshRecs.filter(r => !dismissedIds.has(r.id));
+    toast.success(`Scan complete — ${freshActive.length} issue${freshActive.length !== 1 ? 's' : ''} found`);
     notificationStorage.add({
       title: 'Threat scan complete',
-      body: activeRecs.length === 0 ? 'No issues found — your vault is clean.' : `${activeRecs.length} security issue${activeRecs.length !== 1 ? 's' : ''} require attention.`,
-      type: activeRecs.length === 0 ? 'success' : activeRecs.some(r => r.severity === 'critical') ? 'security' : 'warning',
+      body: freshActive.length === 0 ? 'No issues found — your vault is clean.' : `${freshActive.length} security issue${freshActive.length !== 1 ? 's' : ''} require attention.`,
+      type: freshActive.length === 0 ? 'success' : freshActive.some(r => r.severity === 'critical') ? 'security' : 'warning',
     });
+
+    // Also invalidate cached queries so other pages see fresh data
+    queryClient.invalidateQueries({ queryKey: ['recommendations'] });
+    queryClient.invalidateQueries({ queryKey: ['dashboardData'] });
+
     setTimeout(() => setScanStatus('idle'), 3000);
   };
 
@@ -157,24 +192,32 @@ export default function ThreatAnalysis() {
           <h1 className="text-3xl font-bold mb-2">Threat Analysis</h1>
           <p className="text-muted-foreground">AI-powered security monitoring with real-time threat detection</p>
         </div>
-        <Button
-          onClick={handleRunScan}
-          disabled={scanStatus === 'scanning'}
-          className="rounded-full btn-press shadow-lg"
-          style={{ background: 'linear-gradient(135deg, #ef4444, #f97316)' }}
-        >
-          {scanStatus === 'scanning' ? (
-            <>
-              <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
-              Scanning…
-            </>
-          ) : (
-            <>
-              <Target className="h-4 w-4 mr-2" />
-              {scanStatus === 'complete' ? 'Scan Again' : 'Run Full Scan'}
-            </>
+        <div className="flex items-center gap-3">
+          {hasVaultEntries && (
+            <span className="text-xs text-muted-foreground">
+              {vaultCount} vault {vaultCount === 1 ? 'entry' : 'entries'}
+            </span>
           )}
-        </Button>
+          <Button
+            onClick={handleRunScan}
+            disabled={scanStatus === 'scanning' || !hasVaultEntries}
+            size="lg"
+            className="rounded-full btn-press shadow-lg px-6"
+            style={{ background: hasVaultEntries ? 'linear-gradient(135deg, #ef4444, #f97316)' : undefined }}
+          >
+            {scanStatus === 'scanning' ? (
+              <>
+                <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                Scanning {vaultCount} entries…
+              </>
+            ) : (
+              <>
+                <Target className="h-4 w-4 mr-2" />
+                {!hasVaultEntries ? 'No Entries to Scan' : scanStatus === 'complete' ? 'Scan Again' : 'Run Full Scan'}
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {scanStatus === 'scanning' && (
@@ -230,7 +273,7 @@ export default function ThreatAnalysis() {
       <div className="grid md:grid-cols-3 gap-6">
         {/* Threat feed */}
         <div className="md:col-span-2 space-y-4">
-          <Card className="border-border/40 glass-strong shadow-depth-md">
+          <Card id="section-threat-feed" className="border-border/40 glass-strong shadow-depth-md">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
@@ -241,10 +284,13 @@ export default function ThreatAnalysis() {
                       : 'No active threats detected'}
                   </CardDescription>
                 </div>
-                <Badge variant="secondary" className="text-xs font-mono">
-                  <Activity className="h-3 w-3 mr-1 animate-pulse" />
-                  Live
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <PinButton sectionId="threat-feed" principalId={iiSession?.principalId ?? 'default'} />
+                  <Badge variant="secondary" className="text-xs font-mono">
+                    <Activity className="h-3 w-3 mr-1 animate-pulse" />
+                    Live
+                  </Badge>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -264,13 +310,28 @@ export default function ThreatAnalysis() {
                     ))}
                   </div>
                 </ScrollArea>
+              ) : !hasVaultEntries ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <div className="p-5 rounded-2xl bg-primary/10 mb-4">
+                    <Plus className="h-12 w-12 text-primary" />
+                  </div>
+                  <h3 className="font-semibold mb-1">Add vault entries to begin security scanning</h3>
+                  <p className="text-sm text-muted-foreground max-w-sm">
+                    The threat scanner analyses your stored credentials for weak passwords, reuse, rotation age, and more.
+                    Add entries to your vault to get started.
+                  </p>
+                </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <div className="p-5 rounded-2xl bg-success/10 mb-4">
-                    <Shield className="h-12 w-12 text-success" />
+                    <CheckCircle2 className="h-12 w-12 text-success" />
                   </div>
                   <h3 className="font-semibold mb-1">All clear!</h3>
-                  <p className="text-sm text-muted-foreground">No active threats detected. Keep it up.</p>
+                  <p className="text-sm text-muted-foreground">
+                    {scanResults !== null
+                      ? `Scanned ${vaultCount} vault ${vaultCount === 1 ? 'entry' : 'entries'} — no issues found.`
+                      : 'No active threats detected. Run a full scan to verify.'}
+                  </p>
                 </div>
               )}
             </CardContent>
@@ -280,9 +341,12 @@ export default function ThreatAnalysis() {
         {/* Right column */}
         <div className="space-y-4">
           {/* Overall risk score */}
-          <Card className="border-border/40 glass-strong shadow-depth-md gradient-success">
+          <Card id="section-risk-score" className="border-border/40 glass-strong shadow-depth-md gradient-success">
             <CardHeader>
-              <CardTitle className="text-base">Risk Score</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">Risk Score</CardTitle>
+                <PinButton sectionId="risk-score" principalId={iiSession?.principalId ?? 'default'} />
+              </div>
             </CardHeader>
             <CardContent>
               <div className="flex items-end gap-2 mb-3">

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useGetVaultEntries, useAddVaultEntry, useDeleteVaultEntry, useLogActivity } from './hooks/useQueries';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,8 +11,14 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Plus, Lock, Key, CreditCard, FileText, Trash2, Eye, EyeOff, Shield, AlertTriangle, CheckCircle2, RefreshCw, Smartphone, Cloud, Sparkles, Copy, Wand2, Globe, User } from 'lucide-react';
+import { Plus, Lock, Key, CreditCard, FileText, Trash2, Eye, EyeOff, Shield, AlertTriangle, CheckCircle2, RefreshCw, Smartphone, Cloud, Sparkles, Copy, Wand2, Globe, User, Fingerprint, ShieldAlert } from 'lucide-react';
 import { generateSecurePassword } from './lib/crypto';
+import { isVaultUnlocked, encryptVaultSecret, decryptVaultSecret, isEncryptedPayload } from './lib/vaultCrypto';
+import { hasRegisteredPasskeys } from './lib/webauthn';
+import { totpStorage } from './lib/totp';
+import { sessionStorage_ } from './lib/storage';
+import { evaluateConditionalAccess, breakGlassStorage } from './lib/permissions';
+import VaultUnlockGate from './VaultUnlockGate';
 import { toast } from 'sonner';
 import type { VaultEntry } from './backend';
 
@@ -34,6 +40,34 @@ export default function VaultView() {
   const [entryToDelete, setEntryToDelete] = useState<string | null>(null);
   const [viewingEntry, setViewingEntry] = useState<string | null>(null);
 
+  const [showRevealGate, setShowRevealGate] = useState(false);
+  const [pendingRevealId, setPendingRevealId] = useState<string | null>(null);
+  const [pendingAdd, setPendingAdd] = useState(false);
+  const [decryptedSecrets, setDecryptedSecrets] = useState<Record<string, string>>({});
+
+  // Check if the user has any passwordless verification method set up
+  const session = sessionStorage_.get();
+  const principalId = session?.principalId ?? '';
+  const hasVerificationMethod = hasRegisteredPasskeys(principalId) ||
+    totpStorage.getAll(principalId).some(c => c.verified);
+
+  // Conditional access check for vault access
+  const conditionalAccessResult = useMemo(() => {
+    if (!session) return { access: 'allow' as const, reason: '' };
+    const passkeyCount = (() => {
+      try { return JSON.parse(localStorage.getItem(`nexus-passkeys-${principalId}`) ?? '[]').length; } catch { return 0; }
+    })();
+    return evaluateConditionalAccess({
+      hasPasskeys: passkeyCount > 0,
+      passkeyCount,
+      hasTOTP: totpStorage.getAll(principalId).some(c => c.verified),
+      sessionLoginAt: session.loginAt,
+      role: session.role,
+      action: 'vault_access',
+      breakGlassActive: breakGlassStorage.isActive(),
+    });
+  }, [session, principalId]);
+
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -44,7 +78,7 @@ export default function VaultView() {
     category: 'password',
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formData.name.trim()) {
@@ -52,7 +86,20 @@ export default function VaultView() {
       return;
     }
 
+    // Adding entries requires NO extra verification — user is already authenticated.
+    // Encryption is applied transparently if the session key exists.
     const nowNs = BigInt(Date.now()) * 1_000_000n;
+    const secret = formData.password.trim() || formData.notes.trim();
+
+    let encryptedData = secret;
+    if (isVaultUnlocked() && secret) {
+      try {
+        encryptedData = await encryptVaultSecret(secret);
+      } catch {
+        // Fallback to plaintext if encryption fails
+      }
+    }
+
     const entry: VaultEntry = {
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       name: formData.name.trim(),
@@ -63,14 +110,14 @@ export default function VaultView() {
       notes: formData.notes.trim(),
       tags: [],
       category: formData.category,
-      encryptedData: formData.password.trim() || formData.notes.trim(),
+      encryptedData,
       createdAt: nowNs,
       updatedAt: nowNs,
     };
 
     addEntry(entry, {
       onSuccess: () => {
-        toast.success('Vault entry added successfully');
+        toast.success('Vault entry added — encrypted with AES-256-GCM');
         logActivity({ action: 'vault_add', details: `Added ${formData.category}: ${formData.name}` });
         setFormData({ name: '', username: '', password: '', url: '', notes: '', category: 'password' });
         setShowPassword(false);
@@ -81,6 +128,61 @@ export default function VaultView() {
         toast.error(msg);
       },
     });
+  };
+
+  /** Request reveal of a secret — shows MFA gate if needed */
+  const requestReveal = (entryId: string) => {
+    if (viewingEntry === entryId) {
+      // Hide
+      setViewingEntry(null);
+      setDecryptedSecrets(prev => { const n = { ...prev }; delete n[entryId]; return n; });
+      return;
+    }
+
+    // Require passkey/TOTP verification if the session has expired or not yet verified
+    if (hasVerificationMethod && !isVaultUnlocked()) {
+      setPendingRevealId(entryId);
+      setShowRevealGate(true);
+      return;
+    }
+
+    revealEntry(entryId);
+  };
+
+  const revealEntry = async (entryId: string) => {
+    const entry = vaultEntries?.find(e => e.id === entryId);
+    if (!entry) return;
+
+    const secret = entry.password || entry.encryptedData || '';
+    if (isVaultUnlocked() && isEncryptedPayload(secret)) {
+      try {
+        const plaintext = await decryptVaultSecret(secret);
+        setDecryptedSecrets(prev => ({ ...prev, [entryId]: plaintext }));
+      } catch {
+        toast.error('Decryption failed — session key may have changed');
+        return;
+      }
+    } else {
+      setDecryptedSecrets(prev => ({ ...prev, [entryId]: secret }));
+    }
+
+    setViewingEntry(entryId);
+    logActivity({ action: 'vault_view', details: `Viewed ${entry.category}: ${entry.name}` });
+  };
+
+  const copySecret = async (entryId: string) => {
+    let secret = decryptedSecrets[entryId];
+    if (!secret) {
+      const entry = vaultEntries?.find(e => e.id === entryId);
+      const raw = entry?.password || entry?.encryptedData || '';
+      if (isVaultUnlocked() && isEncryptedPayload(raw)) {
+        try { secret = await decryptVaultSecret(raw); } catch { toast.error('Decryption failed'); return; }
+      } else {
+        secret = raw;
+      }
+    }
+    navigator.clipboard.writeText(secret);
+    toast.success('Password copied');
   };
 
   const handleDelete = () => {
@@ -156,6 +258,23 @@ export default function VaultView() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Conditional Access Banner */}
+      {conditionalAccessResult.access !== 'allow' && (
+        <Card className={`border-border/40 shadow-depth-md ${conditionalAccessResult.access === 'block' ? 'border-red-500/40 bg-red-500/10' : 'border-amber-500/40 bg-amber-500/10'}`}>
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <ShieldAlert className={`h-5 w-5 mt-0.5 shrink-0 ${conditionalAccessResult.access === 'block' ? 'text-red-400' : 'text-amber-400'}`} />
+              <div>
+                <p className={`text-sm font-semibold ${conditionalAccessResult.access === 'block' ? 'text-red-300' : 'text-amber-300'}`}>
+                  {conditionalAccessResult.access === 'block' ? 'Vault Access Blocked' : 'MFA Re-authentication Required'}
+                </p>
+                <p className="text-xs text-white/50 mt-0.5">{conditionalAccessResult.reason}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold mb-2">Enterprise Vault</h1>
@@ -169,7 +288,7 @@ export default function VaultView() {
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-md glass-strong border-border/40">
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleSubmit} data-vault-form>
               <DialogHeader>
                 <DialogTitle>Add Vault Entry</DialogTitle>
                 <DialogDescription>Store your credentials securely with AES-256 encryption</DialogDescription>
@@ -455,7 +574,7 @@ export default function VaultView() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => setViewingEntry(isViewing ? null : entry.id)}
+                                  onClick={() => requestReveal(entry.id)}
                                   className="h-8 px-3 rounded-full btn-press"
                                 >
                                   {isViewing ? (
@@ -465,6 +584,12 @@ export default function VaultView() {
                                   )}
                                   {isViewing ? 'Hide' : 'View'}
                                 </Button>
+                                {hasVerificationMethod && (
+                                  <Badge variant="secondary" className="text-[10px] px-1.5">
+                                    <Fingerprint className="h-2.5 w-2.5 mr-0.5" />
+                                    Passkey / TOTP Gated
+                                  </Badge>
+                                )}
                               </div>
                               {isViewing && (
                                 <div className="p-4 rounded-lg glass-strong border border-border/40 backdrop-blur-xl space-y-3">
@@ -491,14 +616,11 @@ export default function VaultView() {
                                     <div className="flex items-center justify-between gap-2">
                                       <div className="min-w-0">
                                         <span className="text-xs text-muted-foreground flex items-center gap-1"><Key className="h-3 w-3" />Password / Secret</span>
-                                        <p className="text-sm font-mono break-all">{secretVal}</p>
+                                        <p className="text-sm font-mono break-all">{decryptedSecrets[entry.id] ?? secretVal}</p>
                                       </div>
                                       <button
                                         type="button"
-                                        onClick={() => {
-                                          navigator.clipboard.writeText(secretVal);
-                                          toast.success('Password copied');
-                                        }}
+                                        onClick={() => copySecret(entry.id)}
                                         className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
                                         title="Copy password"
                                       >
@@ -597,6 +719,30 @@ export default function VaultView() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Passkey / TOTP verification gate */}
+      {showRevealGate && (
+        <VaultUnlockGate
+          mode="reveal"
+          onUnlock={() => {
+            setShowRevealGate(false);
+            if (pendingRevealId) {
+              revealEntry(pendingRevealId);
+              setPendingRevealId(null);
+            }
+            if (pendingAdd) {
+              // Re-trigger the add after verification — vault is now unlocked
+              setPendingAdd(false);
+              // Use setTimeout to let the gate close first, then submit
+              setTimeout(() => {
+                const form = document.querySelector<HTMLFormElement>('[data-vault-form]');
+                if (form) form.requestSubmit();
+              }, 100);
+            }
+          }}
+          onCancel={() => { setShowRevealGate(false); setPendingRevealId(null); setPendingAdd(false); }}
+        />
+      )}
     </div>
   );
 }

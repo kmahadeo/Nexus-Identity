@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useGetTeams, useCreateTeam, useAddTeamMember, useGetSharedVaultEntries, useShareVaultEntry, useGetVaultEntries } from '../hooks/useQueries';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,10 +9,11 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Users, UserPlus, Shield, Clock, Eye, Edit, Crown, Share2, Lock } from 'lucide-react';
+import { Users, UserPlus, Shield, Clock, Eye, Edit, Crown, Share2, Lock, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Principal } from '@icp-sdk/core/principal';
 import type { TeamMember } from '../backend';
+import { getAuditLog, type AuditEvent } from '../../../lib/auditLog';
 
 export default function TeamSharing() {
   const { data: teams } = useGetTeams();
@@ -343,19 +344,7 @@ export default function TeamSharing() {
         </TabsContent>
 
         <TabsContent value="audit" className="space-y-4">
-          <Card className="border-border/40 glass-strong shadow-depth-md">
-            <CardHeader>
-              <CardTitle>Access Audit Trail</CardTitle>
-              <CardDescription>Track who accessed what and when</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <EmptyState
-                icon={Clock}
-                title="No audit logs yet"
-                description="Access history will appear here once team members interact with shared items"
-              />
-            </CardContent>
-          </Card>
+          <AuditTrailSection />
         </TabsContent>
       </Tabs>
 
@@ -398,6 +387,93 @@ export default function TeamSharing() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function AuditTrailSection() {
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+
+  useEffect(() => {
+    setAuditEvents(getAuditLog());
+    // Poll every 5 seconds for new events
+    const interval = setInterval(() => setAuditEvents(getAuditLog()), 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const getResultIcon = (result: AuditEvent['result']) => {
+    switch (result) {
+      case 'success': return <CheckCircle2 className="h-4 w-4 text-success" />;
+      case 'denied': return <XCircle className="h-4 w-4 text-destructive" />;
+      case 'error': return <AlertTriangle className="h-4 w-4 text-warning" />;
+    }
+  };
+
+  const getResultBadge = (result: AuditEvent['result']) => {
+    const variants: Record<string, string> = {
+      success: 'bg-success/10 text-success border-success/20',
+      denied: 'bg-destructive/10 text-destructive border-destructive/20',
+      error: 'bg-warning/10 text-warning border-warning/20',
+    };
+    return variants[result] ?? '';
+  };
+
+  return (
+    <Card className="border-border/40 glass-strong shadow-depth-md">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>Access Audit Trail</CardTitle>
+            <CardDescription>Real-time event stream from all operations ({auditEvents.length} events)</CardDescription>
+          </div>
+          <Badge variant="secondary" className="text-xs">
+            <Clock className="h-3 w-3 mr-1" />
+            Live
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {auditEvents.length > 0 ? (
+          <ScrollArea className="h-[400px]">
+            <div className="space-y-2">
+              {auditEvents.slice(0, 50).map((event) => (
+                <div key={event.id} className="p-3 rounded-xl glass-effect border border-border/40 shadow-depth-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-2 flex-1 min-w-0">
+                      {getResultIcon(event.result)}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm font-medium font-mono">{event.action}</span>
+                          <Badge variant="outline" className={`text-xs border ${getResultBadge(event.result)}`}>
+                            {event.result}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">{event.details}</p>
+                        <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                          <span>{event.actorEmail}</span>
+                          <span>{event.actorRole}</span>
+                          {event.resourceType && (
+                            <Badge variant="secondary" className="text-xs">{event.resourceType}</Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      {new Date(event.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        ) : (
+          <EmptyState
+            icon={Clock}
+            title="No audit logs yet"
+            description="Events will appear here as you interact with the vault, teams, and passkeys"
+          />
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

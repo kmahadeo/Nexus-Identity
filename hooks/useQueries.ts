@@ -8,6 +8,8 @@ import {
   userRegistry, notificationStorage, type SecurityPolicy, type RegisteredUser,
 } from '../lib/storage';
 import { canDo } from '../lib/permissions';
+import { vaultDB, auditDB, policiesDB, helpDB, profilesDB } from '../lib/supabaseStorage';
+import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
 
 /* ── Demo seed data for guest / first-time users ──────────────────────── */
 
@@ -138,11 +140,9 @@ export function useSaveCallerUserProfile() {
 }
 
 export function useIsCurrentUserAdmin() {
-  return useQuery<boolean>({
-    queryKey: ['isCurrentUserAdmin'],
-    queryFn: async () => sessionStorage_.get()?.role === 'admin',
-    staleTime: Infinity,
-  });
+  const session = sessionStorage_.get();
+  const isAdmin = session?.role === 'admin';
+  return { data: isAdmin };
 }
 
 export function useGetDashboardData() {
@@ -166,7 +166,7 @@ export function useGetDashboardData() {
         breachedAccounts: 0,
         securityScore: score,
         lastScanTime: BigInt(Date.now()) * 1_000_000n,
-        activeDevices: 2,
+        activeDevices: 1 + passkeys.length, // current device + registered passkeys
         passkeysCount: passkeys.length,
         recentActivity: [
           { id: '1', action: 'Login', details: session ? `${session.role} login via Nexus Identity` : 'Session resumed', timestamp: BigInt(Date.now()) * 1_000_000n, ipAddress: '127.0.0.1', deviceName: 'Current Device' },
@@ -207,6 +207,25 @@ export function useAddVaultEntry() {
       }
       vaultStorage.add(entry);
       notificationStorage.add({ title: 'Vault entry added', body: `"${entry.name}" saved to your vault.`, type: 'success' });
+      // Sync to Supabase
+      if (session) {
+        vaultDB.add({
+          owner_id: session.principalId, name: entry.name, title: entry.title,
+          username: entry.username, encrypted_password: entry.password,
+          encrypted_data: entry.encryptedData || '', url: entry.url,
+          category: entry.category, tags: entry.tags || [], notes: entry.notes,
+        }).then(() => console.log('[Supabase] vault entry synced')).catch((e) => console.error('[Supabase] vault sync failed:', e));
+        auditDB.log({
+          action: 'vault.entry.created', actor_id: session.principalId,
+          actor_email: session.email, actor_role: session.role,
+          details: `Added ${entry.category}: ${entry.name}`, result: 'success',
+        }).catch((e) => console.error("[SB]", e));
+        profilesDB.upsert({
+          principal_id: session.principalId, email: session.email, name: session.name,
+          role: session.role, tier: session.tier, is_active: true, mfa_enabled: false,
+          passkeys_count: 0, vault_count: vaultStorage.getRaw().length,
+        }).catch((e) => console.error("[SB]", e));
+      }
       return entry;
     },
     onSuccess: () => {
@@ -223,7 +242,9 @@ export function useUpdateVaultEntry() {
   return useMutation({
     mutationFn: async (entry: VaultEntry) => {
       const session = sessionStorage_.get();
-      if (session?.role === 'guest') throw new Error('Guest accounts are read-only.');
+      if (!session || !canDo(session.principalId, session.role, 'vault:write:own')) {
+        throw new Error(`Permission denied: ${session?.role ?? 'unknown'} cannot update vault entries`);
+      }
       vaultStorage.update(entry);
       return entry;
     },
@@ -236,9 +257,20 @@ export function useDeleteVaultEntry() {
   return useMutation({
     mutationFn: async (id: string) => {
       const session = sessionStorage_.get();
-      if (session?.role === 'guest') throw new Error('Guest accounts cannot delete entries.');
-      if (session?.role === 'contractor') throw new Error('Contractors cannot delete vault entries.');
+      if (!session || !canDo(session.principalId, session.role, 'vault:delete:own')) {
+        throw new Error(`Permission denied: ${session?.role ?? 'unknown'} cannot delete vault entries`);
+      }
       vaultStorage.delete(id);
+      // Sync to Supabase
+      vaultDB.delete(id).catch((e) => console.error("[SB]", e));
+      if (session) {
+        auditDB.log({
+          action: 'vault.entry.deleted', actor_id: session.principalId,
+          actor_email: session.email, actor_role: session.role,
+          resource_id: id, resource_type: 'vault_entry',
+          details: `Deleted vault entry ${id}`, result: 'success',
+        }).catch((e) => console.error("[SB]", e));
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vaultEntries'] });
@@ -249,7 +281,18 @@ export function useDeleteVaultEntry() {
 }
 
 export function useLogActivity() {
-  return useMutation({ mutationFn: async (_: { action: string; details: string }) => {} });
+  return useMutation({
+    mutationFn: async (event: { action: string; details: string }) => {
+      const session = sessionStorage_.get();
+      if (session) {
+        auditDB.log({
+          action: event.action, actor_id: session.principalId,
+          actor_email: session.email, actor_role: session.role,
+          details: event.details, result: 'success',
+        }).catch((e) => console.error("[SB]", e));
+      }
+    },
+  });
 }
 
 export function useGetRecommendations() {
@@ -323,8 +366,26 @@ export function useCreateTeam() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (name: string) => {
+      const session = sessionStorage_.get();
+      if (!session || !canDo(session.principalId, session.role, 'team:write')) {
+        throw new Error(`Permission denied: ${session?.role ?? 'unknown'} cannot create teams`);
+      }
       const team: Team = { id: crypto.randomUUID(), name, members: [], createdAt: BigInt(Date.now()) * 1_000_000n };
       saveTeams([...loadTeams(), team]);
+      // Sync to Supabase
+      if (isSupabaseConfigured()) {
+        const client = getSupabase();
+        if (client) {
+          client.from('teams').insert({
+            id: team.id, name: team.name, created_by: session.principalId,
+          }).catch((e) => console.error("[SB]", e));
+        }
+      }
+      auditDB.log({
+        action: 'team.created', actor_id: session.principalId,
+        actor_email: session.email, actor_role: session.role,
+        details: `Created team: ${name}`, result: 'success',
+      }).catch((e) => console.error("[SB]", e));
       return team;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['teams'] }),
@@ -335,10 +396,91 @@ export function useAddTeamMember() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ teamId, member }: { teamId: string; member: TeamMember }) => {
+      const session = sessionStorage_.get();
+      if (!session || !canDo(session.principalId, session.role, 'team:write')) {
+        throw new Error(`Permission denied: ${session?.role ?? 'unknown'} cannot add team members`);
+      }
       const teams = loadTeams().map(t =>
         t.id === teamId ? { ...t, members: [...t.members, member] } : t,
       );
       saveTeams(teams);
+      // Sync to Supabase
+      if (isSupabaseConfigured()) {
+        const client = getSupabase();
+        if (client) {
+          client.from('team_members').insert({
+            team_id: teamId, principal_id: member.principalId || member.principal,
+            name: member.name, email: member.email, role: member.role,
+          }).catch((e) => console.error("[SB]", e));
+        }
+      }
+      auditDB.log({
+        action: 'team.member_added', actor_id: session.principalId,
+        actor_email: session.email, actor_role: session.role,
+        resource_id: teamId, details: `Added ${member.name} to team`, result: 'success',
+      }).catch((e) => console.error("[SB]", e));
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['teams'] }),
+  });
+}
+
+export function useRenameTeam() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ teamId, newName }: { teamId: string; newName: string }) => {
+      const session = sessionStorage_.get();
+      if (!session || (!canDo(session.principalId, session.role, 'team:write') && !canDo(session.principalId, session.role, 'team:admin'))) {
+        throw new Error(`Permission denied: ${session?.role ?? 'unknown'} cannot rename teams`);
+      }
+      const teams = loadTeams().map(t =>
+        t.id === teamId ? { ...t, name: newName } : t,
+      );
+      saveTeams(teams);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['teams'] }),
+  });
+}
+
+export function useRemoveTeamMember() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ teamId, principalId }: { teamId: string; principalId: string }) => {
+      const session = sessionStorage_.get();
+      if (!session || (!canDo(session.principalId, session.role, 'team:write') && !canDo(session.principalId, session.role, 'team:admin'))) {
+        throw new Error(`Permission denied: ${session?.role ?? 'unknown'} cannot remove team members`);
+      }
+      const teams = loadTeams().map(t =>
+        t.id === teamId ? { ...t, members: t.members.filter(m => m.principalId !== principalId) } : t,
+      );
+      saveTeams(teams);
+      if (isSupabaseConfigured()) {
+        const client = getSupabase();
+        if (client) {
+          client.from('team_members').delete()
+            .eq('team_id', teamId).eq('principal_id', principalId).catch((e) => console.error("[SB]", e));
+        }
+      }
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['teams'] }),
+  });
+}
+
+export function useDeleteTeam() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (teamId: string) => {
+      const session = sessionStorage_.get();
+      if (!session || (!canDo(session.principalId, session.role, 'team:write') && !canDo(session.principalId, session.role, 'team:admin'))) {
+        throw new Error(`Permission denied: ${session?.role ?? 'unknown'} cannot delete teams`);
+      }
+      const teams = loadTeams().filter(t => t.id !== teamId);
+      saveTeams(teams);
+      if (isSupabaseConfigured()) {
+        const client = getSupabase();
+        if (client) {
+          client.from('teams').delete().eq('id', teamId).catch((e) => console.error("[SB]", e));
+        }
+      }
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['teams'] }),
   });
@@ -365,6 +507,10 @@ export function useShareVaultEntry() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ entry, sharedWith, permissions }: { entry: VaultEntry; sharedWith: string[]; permissions: string[] }) => {
+      const session = sessionStorage_.get();
+      if (!session || !canDo(session.principalId, session.role, 'vault:write:shared')) {
+        throw new Error(`Permission denied: ${session?.role ?? 'unknown'} cannot share vault entries`);
+      }
       const nowNs = BigInt(Date.now()) * 1_000_000n;
       const shared: SharedVaultEntry = {
         id: crypto.randomUUID(),
@@ -403,7 +549,27 @@ export function useGetPolicies() {
 export function useTogglePolicy() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => { policyStorage.toggle(id); },
+    mutationFn: async (id: string) => {
+      const session = sessionStorage_.get();
+      if (!session || !canDo(session.principalId, session.role, 'admin:policies:write')) {
+        throw new Error(`Permission denied: ${session?.role ?? 'unknown'} cannot toggle policies`);
+      }
+      const currentState = policyStorage.getAll().find(p => p.id === id);
+      policyStorage.toggle(id);
+      // Sync to Supabase
+      if (currentState) {
+        policiesDB.toggle(id, !currentState.enabled).catch((e) => console.error("[SB]", e));
+      }
+      if (session) {
+        auditDB.log({
+          action: 'policy.toggled', actor_id: session.principalId,
+          actor_email: session.email, actor_role: session.role,
+          resource_id: id, resource_type: 'policy',
+          details: `Policy ${currentState?.name ?? id} ${currentState?.enabled ? 'disabled' : 'enabled'}`,
+          result: 'success',
+        }).catch((e) => console.error("[SB]", e));
+      }
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['policies'] }),
   });
 }
@@ -411,7 +577,21 @@ export function useTogglePolicy() {
 export function useAddPolicy() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (policy: SecurityPolicy) => { policyStorage.add(policy); return policy; },
+    mutationFn: async (policy: SecurityPolicy) => {
+      const session = sessionStorage_.get();
+      if (!session || !canDo(session.principalId, session.role, 'admin:policies:write')) {
+        throw new Error(`Permission denied: ${session?.role ?? 'unknown'} cannot add policies`);
+      }
+      policyStorage.add(policy);
+      // Sync to Supabase
+      policiesDB.add({ ...policy, created_by: session.principalId }).catch((e) => console.error("[SB]", e));
+      auditDB.log({
+        action: 'policy.created', actor_id: session.principalId,
+        actor_email: session.email, actor_role: session.role,
+        details: `Created policy: ${policy.name}`, result: 'success',
+      }).catch((e) => console.error("[SB]", e));
+      return policy;
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['policies'] }),
   });
 }
@@ -441,7 +621,23 @@ export function useGetAllUsers() {
 export function useDeactivateUser() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (principalId: string) => { userRegistry.deactivate(principalId); },
+    mutationFn: async (principalId: string) => {
+      const session = sessionStorage_.get();
+      if (!session || !canDo(session.principalId, session.role, 'admin:users:write')) {
+        throw new Error(`Permission denied: ${session?.role ?? 'unknown'} cannot deactivate users`);
+      }
+      userRegistry.deactivate(principalId);
+      // Sync to Supabase
+      profilesDB.deactivate(principalId).catch((e) => console.error("[SB]", e));
+      if (session) {
+        auditDB.log({
+          action: 'user.deactivated', actor_id: session.principalId,
+          actor_email: session.email, actor_role: session.role,
+          resource_id: principalId, resource_type: 'user',
+          details: `Deactivated user ${principalId}`, result: 'success',
+        }).catch((e) => console.error("[SB]", e));
+      }
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['allUsers'] }),
   });
 }
@@ -545,7 +741,7 @@ export function useGetAIRecommendationsQuery(context: AIContext | null) {
         const issues: string[] = [];
         if (weak > 0) issues.push(`${weak} weak password${weak !== 1 ? 's' : ''}`);
         if (old > 0) issues.push(`${old} credential${old !== 1 ? 's' : ''} overdue for rotation`);
-        advice = `Found ${issues.join(' and ')} in your vault. Rotate weak credentials immediately and enable passkey authentication for critical accounts. Add an AI provider key in Settings → AI Coach for deeper analysis.`;
+        advice = `Found ${issues.join(' and ')} in your vault. Rotate weak credentials immediately and enable passkey authentication for critical accounts. Add an AI provider key in Settings → Security Advisor for deeper analysis.`;
       } else {
         advice = `All ${total} vault entries meet basic requirements. Continue rotating credentials every 90 days and register a passkey for phishing-resistant authentication.`;
       }
@@ -638,7 +834,7 @@ export function useChatWithAI() {
         return { message: 'Prefer FIDO2/passkeys over TOTP — TOTP can be phished via real-time relay attacks. If TOTP is required, use an authenticator with encrypted backups. Enable MFA on every account, prioritising AWS, GitHub, and financial services first.', riskScore: 8, confidence: 97 };
       if (q.includes('threat') || q.includes('breach') || q.includes('scan'))
         return { message: 'Run a threat scan in the Threats tab — it checks password strength, reuse, rotation age, and missing passkeys across all your vault entries. Critical findings should be resolved within 24 hours. Rotate any breached credential immediately and invalidate all active sessions.', riskScore: 30, confidence: 90 };
-      return { message: `To enable full AI responses, go to Settings → AI Coach and add an API key (Anthropic, OpenAI, or Google Gemini).\n\nYou asked: "${lastMsg.slice(0, 80)}"\n\nQuick tip: check your Threats tab for a live security scan of your vault.`, riskScore: 18, confidence: 82 };
+      return { message: `To enable full AI responses, go to Settings → Security Advisor and add an API key (Anthropic, OpenAI, or Google Gemini).\n\nYou asked: "${lastMsg.slice(0, 80)}"\n\nQuick tip: check your Threats tab for a live security scan of your vault.`, riskScore: 18, confidence: 82 };
     },
   });
 }

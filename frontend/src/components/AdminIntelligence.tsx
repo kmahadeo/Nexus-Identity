@@ -1,17 +1,26 @@
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Brain, Shield, AlertTriangle, TrendingUp, Users, Activity, Zap, CheckCircle2, Target, FileText, Database, ExternalLink } from 'lucide-react';
+import { Brain, Shield, AlertTriangle, TrendingUp, Users, Activity, Zap, CheckCircle2, Target, FileText, Database, ExternalLink, Clock, XCircle } from 'lucide-react';
 import { useGetVaultEntries, useGetTeams, useGetRecommendations, useGetPasskeyCount } from '../hooks/useQueries';
 import { computeSecurityScore, type SecurityState } from '../lib/securityEngine';
+import { getAuditLog, type AuditEvent } from '../../../lib/auditLog';
 
 export default function AdminIntelligence() {
   const { data: vaultEntries = [] } = useGetVaultEntries();
   const { data: teams = [] } = useGetTeams();
   const { data: recommendations = [] } = useGetRecommendations();
   const { data: passkeyCount = 0 } = useGetPasskeyCount();
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+
+  useEffect(() => {
+    setAuditEvents(getAuditLog());
+    const interval = setInterval(() => setAuditEvents(getAuditLog()), 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const state: SecurityState = { vaultEntries, passkeyCount, recommendations, teamCount: teams.length };
   const score = computeSecurityScore(state);
@@ -300,6 +309,66 @@ export default function AdminIntelligence() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Real Audit Log */}
+      <Card className="border-border/40 glass-strong shadow-depth-md">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Audit Log</CardTitle>
+              <CardDescription>Real-time security event stream ({auditEvents.length} events captured)</CardDescription>
+            </div>
+            <Badge variant="secondary" className="text-xs">
+              <Activity className="h-3 w-3 mr-1 animate-pulse" />
+              Live
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {auditEvents.length > 0 ? (
+            <ScrollArea className="h-[360px]">
+              <div className="space-y-2">
+                {auditEvents.slice(0, 100).map((event) => (
+                  <AuditEventRow key={event.id} event={event} />
+                ))}
+              </div>
+            </ScrollArea>
+          ) : (
+            <div className="text-center py-8 text-sm text-muted-foreground">
+              No audit events recorded yet. Events are captured as users interact with the system.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function AuditEventRow({ event }: { event: AuditEvent }) {
+  const getResultIcon = (result: AuditEvent['result']) => {
+    switch (result) {
+      case 'success': return <CheckCircle2 className="h-3.5 w-3.5 text-success" />;
+      case 'denied': return <XCircle className="h-3.5 w-3.5 text-destructive" />;
+      case 'error': return <AlertTriangle className="h-3.5 w-3.5 text-warning" />;
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-3 p-2.5 rounded-lg glass-effect border border-border/40">
+      {getResultIcon(event.result)}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold font-mono">{event.action}</span>
+          {event.resourceType && (
+            <Badge variant="secondary" className="text-xs">{event.resourceType}</Badge>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground truncate">{event.details}</p>
+      </div>
+      <div className="text-right shrink-0">
+        <p className="text-xs text-muted-foreground">{event.actorEmail}</p>
+        <p className="text-xs text-muted-foreground">{new Date(event.timestamp).toLocaleTimeString()}</p>
+      </div>
     </div>
   );
 }

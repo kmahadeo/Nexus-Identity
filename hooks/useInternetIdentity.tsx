@@ -1,7 +1,11 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { sessionStorage_, userRegistry, roleRegistry } from '../lib/storage';
 import type { UserRole, SessionData } from '../lib/storage';
 import { authenticatePasskey } from '../lib/webauthn';
+import { activeSessionStorage, type ActiveSession } from '../lib/permissions';
+import { profilesDB, sessionsDB, auditDB } from '../lib/supabaseStorage';
+import { markVaultVerified } from '../lib/vaultCrypto';
+import { migrateAllToSupabase } from '../lib/migrateToSupabase';
 
 interface Identity {
   getPrincipal(): { toText(): string };
@@ -42,15 +46,62 @@ export function InternetIdentityProvider({ children }: { children: ReactNode }) 
     sessionStorage_.set(s);
     userRegistry.upsert(s);
     roleRegistry.save({ email, name, role, tier, principalId });
+
+    // Record active session for Session Management Dashboard
+    const activeSession: ActiveSession = {
+      id: crypto.randomUUID(),
+      principalId,
+      name,
+      email,
+      device: navigator.userAgent,
+      loginAt: Date.now(),
+      lastActive: Date.now(),
+      ipAddress: '127.0.0.1',
+    };
+    activeSessionStorage.add(activeSession);
+
+    // Sync to Supabase — profile must complete before session (FK constraint)
+    profilesDB.upsert({
+      principal_id: principalId, email, name, role, tier,
+      is_active: true, mfa_enabled: false, passkeys_count: 0, vault_count: 0,
+    }).then(() => {
+      // Session and audit can fire after profile exists
+      sessionsDB.add({
+        principal_id: principalId, name, email,
+        device: navigator.userAgent, ip_address: '127.0.0.1',
+      }).catch(() => {});
+      auditDB.log({
+        action: 'auth.login', actor_id: principalId, actor_email: email,
+        actor_role: role, details: `Logged in as ${role} (${tier})`, result: 'success',
+      }).catch(() => {});
+    }).catch(() => {});
+
+    // Mark vault as verified for 30 minutes — login IS the verification
+    markVaultVerified();
+
     setIdentity({ getPrincipal: () => ({ toText: () => principalId }) });
     setSession(s);
     setLoginStatus('logged-in');
+
+    // One-time migration: push all existing localStorage data to Supabase
+    const migrationKey = `nexus-migrated-${principalId}`;
+    if (!sessionStorage.getItem(migrationKey)) {
+      sessionStorage.setItem(migrationKey, '1');
+      migrateAllToSupabase().then(({ migrated, errors }) => {
+        if (migrated.length > 0) console.log('[Migration] Synced:', migrated.join(', '));
+        if (errors.length > 0) console.warn('[Migration] Errors:', errors.join('; '));
+      }).catch(() => {});
+    }
   }, []);
 
   /**
-   * Primary login function — checks if email is a returning user.
-   * If yes: auto-login with saved role (optionally via passkey).
-   * If no:  shows role selection for new-user onboarding.
+   * Primary login function.
+   *
+   * Returning users:
+   *   - If passkeys exist → MUST authenticate with passkey
+   *   - If no passkeys → allowed to continue (they'll set up passkeys during onboarding)
+   * New users:
+   *   - Shown role selection for onboarding
    */
   const loginWithEmail = useCallback(async (email: string, usePasskey = false) => {
     const trimmed = email.trim().toLowerCase();
@@ -60,27 +111,29 @@ export function InternetIdentityProvider({ children }: { children: ReactNode }) 
     const existing = roleRegistry.get(trimmed);
 
     if (existing) {
-      // Returning user — attempt passkey authentication if requested
-      if (usePasskey) {
-        const passkeyKey = `nexus-passkeys-${existing.principalId}`;
-        const passkeys = (() => {
-          try { return JSON.parse(localStorage.getItem(passkeyKey) ?? '[]'); } catch { return []; }
-        })();
+      const passkeyKey = `nexus-passkeys-${existing.principalId}`;
+      const passkeys = (() => {
+        try { return JSON.parse(localStorage.getItem(passkeyKey) ?? '[]'); } catch { return []; }
+      })();
 
-        if (passkeys.length > 0) {
-          try {
-            const result = await authenticatePasskey(undefined, existing.principalId);
-            if (result) {
-              selectRole(existing.role, existing.name, trimmed, existing.tier);
-              return;
-            }
-          } catch {
-            // WebAuthn cancelled or hardware not available — fall through to password-less auto-login
+      // If user has passkeys, authenticate with passkey (auto-trigger the prompt)
+      if (passkeys.length > 0) {
+        try {
+          const result = await authenticatePasskey(undefined, existing.principalId);
+          if (result) {
+            selectRole(existing.role, existing.name, trimmed, existing.tier);
+            return;
           }
+        } catch {
+          // Passkey cancelled or failed — return to idle
+          setLoginStatus('idle');
+          setPendingEmail(trimmed);
+          return;
         }
       }
 
-      // Auto-restore session with saved role (no role selection screen)
+      // No passkeys registered — allow email-only login for now
+      // (they'll be prompted to register passkeys during onboarding)
       setTimeout(() => selectRole(existing.role, existing.name, trimmed, existing.tier), 500);
     } else {
       // New user — present role selection
@@ -96,12 +149,38 @@ export function InternetIdentityProvider({ children }: { children: ReactNode }) 
   }, []);
 
   const clear = useCallback(async () => {
+    // Remove active session on logout
+    const currentSession = sessionStorage_.get();
+    if (currentSession) {
+      activeSessionStorage.remove(currentSession.principalId);
+      // Sync to Supabase
+      sessionsDB.remove(currentSession.principalId).catch(() => {});
+      auditDB.log({
+        action: 'auth.logout', actor_id: currentSession.principalId,
+        actor_email: currentSession.email, actor_role: currentSession.role,
+        details: 'User logged out', result: 'success',
+      }).catch(() => {});
+    }
     setIdentity(null);
     setSession(null);
     setPendingEmail('');
     setLoginStatus('idle');
     sessionStorage_.clear();
   }, []);
+
+  // Periodically update lastActive for the current session (every 60s)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (session) {
+      activeSessionStorage.updateLastActive(session.principalId);
+      intervalRef.current = setInterval(() => {
+        activeSessionStorage.updateLastActive(session.principalId);
+      }, 60_000);
+    }
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [session]);
 
   return (
     <InternetIdentityContext.Provider

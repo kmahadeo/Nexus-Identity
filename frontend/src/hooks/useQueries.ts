@@ -13,6 +13,10 @@ import type {
   AIResponse
 } from '../backend';
 import { Principal } from '@icp-sdk/core/principal';
+import { logAuditEvent } from '../../../lib/auditLog';
+import { enforcePolicy } from '../../../lib/permissions';
+import { sessionStorage_ } from '../../../lib/storage';
+import { toast } from 'sonner';
 
 export function useGetCallerUserProfile() {
   const { actor, isFetching: actorFetching } = useActor();
@@ -100,7 +104,43 @@ export function useAddVaultEntry() {
   return useMutation({
     mutationFn: async (entry: VaultEntry) => {
       if (!actor) throw new Error('Actor not available');
+
+      const session = sessionStorage_.get();
+
+      // --- Policy enforcement: password complexity ---
+      const passwordCheck = enforcePolicy('vault.entry.add', {
+        password: entry.encryptedData,
+        category: entry.category,
+        role: session?.role,
+        tier: session?.tier,
+      });
+
+      if (!passwordCheck.allowed) {
+        if (passwordCheck.enforcement === 'block') {
+          logAuditEvent({
+            action: 'vault.entry.create',
+            resource: entry.id,
+            resourceType: 'vault_entry',
+            details: `Blocked: ${passwordCheck.reason}`,
+            result: 'denied',
+          });
+          throw new Error(passwordCheck.reason ?? 'Blocked by policy');
+        }
+        // 'warn' enforcement — show toast but proceed
+        if (passwordCheck.enforcement === 'warn') {
+          toast.warning(`Policy warning: ${passwordCheck.reason}`);
+        }
+      }
+
       await actor.addVaultEntry(entry);
+
+      logAuditEvent({
+        action: 'vault.entry.created',
+        resource: entry.id,
+        resourceType: 'vault_entry',
+        details: `Added ${entry.category}: ${entry.name}`,
+        result: 'success',
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vaultEntries'] });
@@ -119,6 +159,14 @@ export function useDeleteVaultEntry() {
     mutationFn: async (entryId: string) => {
       if (!actor) throw new Error('Actor not available');
       await actor.deleteVaultEntry(entryId);
+
+      logAuditEvent({
+        action: 'vault.entry.deleted',
+        resource: entryId,
+        resourceType: 'vault_entry',
+        details: `Deleted vault entry ${entryId}`,
+        result: 'success',
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vaultEntries'] });
@@ -136,6 +184,12 @@ export function useLogActivity() {
     mutationFn: async ({ action, details }: { action: string; details: string }) => {
       if (!actor) throw new Error('Actor not available');
       await actor.logActivity(action, details);
+
+      logAuditEvent({
+        action: `activity.${action}`,
+        details,
+        result: 'success',
+      });
     },
   });
 }
@@ -190,7 +244,16 @@ export function useCreateTeam() {
   return useMutation({
     mutationFn: async (name: string) => {
       if (!actor) throw new Error('Actor not available');
-      return actor.createTeam(name);
+      const result = await actor.createTeam(name);
+
+      logAuditEvent({
+        action: 'team.created',
+        resourceType: 'team',
+        details: `Created team: ${name}`,
+        result: 'success',
+      });
+
+      return result;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
@@ -206,6 +269,14 @@ export function useAddTeamMember() {
     mutationFn: async ({ teamId, member }: { teamId: string; member: TeamMember }) => {
       if (!actor) throw new Error('Actor not available');
       await actor.addTeamMember(teamId, member);
+
+      logAuditEvent({
+        action: 'team.member.added',
+        resource: teamId,
+        resourceType: 'team',
+        details: `Added member (${member.role}) to team ${teamId}`,
+        result: 'success',
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
@@ -231,17 +302,25 @@ export function useShareVaultEntry() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ 
-      entry, 
-      sharedWith, 
-      permissions 
-    }: { 
-      entry: VaultEntry; 
-      sharedWith: Principal[]; 
-      permissions: string[] 
+    mutationFn: async ({
+      entry,
+      sharedWith,
+      permissions
+    }: {
+      entry: VaultEntry;
+      sharedWith: Principal[];
+      permissions: string[]
     }) => {
       if (!actor) throw new Error('Actor not available');
       await actor.shareVaultEntry(entry, sharedWith, permissions);
+
+      logAuditEvent({
+        action: 'vault.entry.shared',
+        resource: entry.id,
+        resourceType: 'vault_entry',
+        details: `Shared "${entry.name}" with ${sharedWith.length} member(s), permissions: ${permissions.join(', ')}`,
+        result: 'success',
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sharedVaultEntries'] });
@@ -271,6 +350,14 @@ export function useAddPasskeyCredential() {
     mutationFn: async (credential: PasskeyCredential) => {
       if (!actor) throw new Error('Actor not available');
       await actor.addPasskeyCredential(credential);
+
+      logAuditEvent({
+        action: 'passkey.registered',
+        resource: credential.credentialId,
+        resourceType: 'passkey',
+        details: `Registered passkey: ${credential.deviceName}`,
+        result: 'success',
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['passkeyCredentials'] });
@@ -288,6 +375,14 @@ export function useDeletePasskeyCredential() {
     mutationFn: async (credentialId: string) => {
       if (!actor) throw new Error('Actor not available');
       await actor.deletePasskeyCredential(credentialId);
+
+      logAuditEvent({
+        action: 'passkey.deleted',
+        resource: credentialId,
+        resourceType: 'passkey',
+        details: `Deleted passkey: ${credentialId}`,
+        result: 'success',
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['passkeyCredentials'] });

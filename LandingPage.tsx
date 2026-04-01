@@ -1,9 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import { useInternetIdentity } from './hooks/useInternetIdentity';
 import type { UserRole } from './hooks/useInternetIdentity';
-import { ArrowRight, Moon, Sun, Fingerprint, Key, Shield, Zap, Lock, Globe, ChevronLeft, User, Users, Wrench, Eye, Crown } from 'lucide-react';
+import { ArrowRight, Moon, Sun, Fingerprint, Key, Zap, Lock, Globe, ChevronLeft, User, Users, Wrench, Eye, Crown, Loader2 } from 'lucide-react';
 import * as THREE from 'three';
 import NexusLogo from './NexusLogo';
+import {
+  getGoogleConfig,
+  getAppleConfig,
+  initiateGoogleLogin,
+  initiateAppleLogin,
+  simulateGoogleLogin,
+  simulateAppleLogin,
+  isDemoMode,
+} from './lib/ssoConfig';
+import {
+  enableDemoMode,
+  seedDemoData,
+  createDemoSession,
+} from './lib/demoMode';
+import { logError } from './lib/logger';
 
 type Theme = 'dark' | 'light';
 
@@ -194,9 +209,51 @@ export default function LandingPage() {
   const [hoveredRole, setHoveredRole] = useState<UserRole | null>(null);
   const [platformLabel, setPlatformLabel] = useState('Biometric');
   const [hasPasskey, setHasPasskey] = useState(false);
+  const [hasPasskeyForEmail, setHasPasskeyForEmail] = useState(false);
   const [emailInput, setEmailInput] = useState('');
   const [nameInput, setNameInput] = useState('');
   const [emailError, setEmailError] = useState('');
+  const [ssoLoading, setSsoLoading] = useState<'google' | 'apple' | null>(null);
+  const [showDemoAccess, setShowDemoAccess] = useState(false);
+  const [demoPassphrase, setDemoPassphrase] = useState('');
+  const [demoError, setDemoError] = useState('');
+
+  const handleDemoLogin = () => {
+    const ok = enableDemoMode(demoPassphrase);
+    if (!ok) {
+      setDemoError('Invalid passphrase. Please try again.');
+      return;
+    }
+    setDemoError('');
+    const session = createDemoSession();
+    seedDemoData();
+    // Log in directly as the demo admin
+    selectRole(session.role, session.name, session.email, session.tier);
+  };
+
+  const handleSSOLogin = async (provider: 'google' | 'apple') => {
+    setSsoLoading(provider);
+    try {
+      if (isDemoMode()) {
+        // DEMO mode: simulate OAuth flow with 1.5s delay
+        const profile = provider === 'google'
+          ? await simulateGoogleLogin()
+          : await simulateAppleLogin();
+        // Go straight to role selection with the SSO email
+        loginWithEmail(profile.email, false);
+      } else {
+        // Real OAuth: redirect to provider
+        if (provider === 'google') {
+          await initiateGoogleLogin();
+        } else {
+          await initiateAppleLogin();
+        }
+      }
+    } catch (err) {
+      logError(`[SSO] ${provider} login failed:`, err);
+      setSsoLoading(null);
+    }
+  };
 
   useAuraShader(webglRef, theme);
 
@@ -214,6 +271,22 @@ export default function LandingPage() {
     });
     setHasPasskey(hasAny);
   }, []);
+
+  // Check if the currently typed email has passkeys registered
+  useEffect(() => {
+    const em = emailInput.trim().toLowerCase();
+    if (!em || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+      setHasPasskeyForEmail(false);
+      return;
+    }
+    try {
+      const stored = localStorage.getItem(`nexus-passkeys-${em}`);
+      const keys = stored ? JSON.parse(stored) : [];
+      setHasPasskeyForEmail(Array.isArray(keys) && keys.length > 0);
+    } catch {
+      setHasPasskeyForEmail(false);
+    }
+  }, [emailInput]);
 
   const handleContinue = (withPasskey = false) => {
     const em = emailInput.trim();
@@ -396,6 +469,85 @@ export default function LandingPage() {
                   </p>
                 </div>
 
+                {/* SSO Buttons */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <button
+                    onClick={() => handleSSOLogin('google')}
+                    disabled={isLoggingIn || ssoLoading !== null}
+                    style={{
+                      width: '100%', padding: '12px 16px',
+                      background: 'var(--aura-bg-surface-1)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '14px', color: 'var(--aura-text-primary)',
+                      fontFamily: 'Space Grotesk, sans-serif', fontSize: '14px',
+                      fontWeight: 500,
+                      cursor: ssoLoading ? 'not-allowed' : 'pointer',
+                      opacity: ssoLoading && ssoLoading !== 'google' ? 0.5 : 1,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+                      transition: 'all 0.18s ease',
+                    }}
+                    onMouseEnter={e => { if (!ssoLoading) (e.currentTarget.style.background = 'var(--aura-bg-surface-2)'); (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'); }}
+                    onMouseLeave={e => { (e.currentTarget.style.background = 'var(--aura-bg-surface-1)'); (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'); }}
+                  >
+                    {ssoLoading === 'google' ? (
+                      <div className="aura-dots" style={{ display: 'flex', gap: '4px' }}><span /><span /><span /></div>
+                    ) : (
+                      <>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+                          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18A10.96 10.96 0 001 12c0 1.77.42 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+                          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                        </svg>
+                        Continue with Google
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => handleSSOLogin('apple')}
+                    disabled={isLoggingIn || ssoLoading !== null}
+                    style={{
+                      width: '100%', padding: '12px 16px',
+                      background: 'var(--aura-bg-surface-1)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '14px', color: 'var(--aura-text-primary)',
+                      fontFamily: 'Space Grotesk, sans-serif', fontSize: '14px',
+                      fontWeight: 500,
+                      cursor: ssoLoading ? 'not-allowed' : 'pointer',
+                      opacity: ssoLoading && ssoLoading !== 'apple' ? 0.5 : 1,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+                      transition: 'all 0.18s ease',
+                    }}
+                    onMouseEnter={e => { if (!ssoLoading) (e.currentTarget.style.background = 'var(--aura-bg-surface-2)'); (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'); }}
+                    onMouseLeave={e => { (e.currentTarget.style.background = 'var(--aura-bg-surface-1)'); (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'); }}
+                  >
+                    {ssoLoading === 'apple' ? (
+                      <div className="aura-dots" style={{ display: 'flex', gap: '4px' }}><span /><span /><span /></div>
+                    ) : (
+                      <>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.4C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/>
+                        </svg>
+                        Continue with Apple
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* SSO / Email divider */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '12px',
+                  margin: '2px 0',
+                }}>
+                  <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.08)' }} />
+                  <span style={{
+                    fontFamily: 'JetBrains Mono, monospace', fontSize: '10px',
+                    letterSpacing: '0.15em', color: 'var(--aura-text-tech)',
+                    textTransform: 'uppercase', flexShrink: 0,
+                  }}>or</span>
+                  <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.08)' }} />
+                </div>
+
                 {/* Email input */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <input
@@ -403,7 +555,7 @@ export default function LandingPage() {
                     placeholder="you@example.com"
                     value={emailInput}
                     onChange={e => { setEmailInput(e.target.value); setEmailError(''); }}
-                    onKeyDown={e => e.key === 'Enter' && handleContinue(hasPasskey)}
+                    onKeyDown={e => e.key === 'Enter' && handleContinue(false)}
                     disabled={isLoggingIn}
                     style={{
                       width: '100%', padding: '12px 16px',
@@ -421,48 +573,12 @@ export default function LandingPage() {
                   )}
                 </div>
 
-                {/* Quick auth via passkey/biometric (shortcut — still requires email) */}
-                {hasPasskey && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div className="aura-sso-grid">
-                      <button
-                        className="aura-btn-sso" title={`Passkey — ${platformLabel}`}
-                        onClick={() => handleContinue(true)} disabled={isLoggingIn}
-                      >
-                        <Key size={20} />
-                      </button>
-                      <button
-                        className="aura-btn-sso" title={platformLabel}
-                        onClick={() => handleContinue(true)} disabled={isLoggingIn}
-                      >
-                        <Fingerprint size={20} />
-                      </button>
-                      <button
-                        className="aura-btn-sso" title="FIDO2 / Zero-Trust"
-                        onClick={() => handleContinue(true)} disabled={isLoggingIn}
-                      >
-                        <Shield size={20} />
-                      </button>
-                    </div>
-                    <div style={{
-                      padding: '10px 14px', borderRadius: '12px',
-                      background: 'rgba(34,211,238,0.07)', border: '1px solid rgba(34,211,238,0.2)',
-                      display: 'flex', alignItems: 'center', gap: '10px',
-                    }}>
-                      <Fingerprint size={15} style={{ color: '#22d3ee', flexShrink: 0 }} />
-                      <span style={{ fontFamily: 'Space Grotesk, sans-serif', fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>
-                        Passkey detected — use the icons above or click <strong style={{ color: '#22d3ee' }}>AUTHENTICATE</strong> below for {platformLabel}
-                      </span>
-                    </div>
-                  </div>
-                )}
-
                 <div className="aura-divider">NEXUS IDENTITY</div>
 
-                {/* CTA */}
+                {/* Primary CTA — always email-only login */}
                 <button
                   className="aura-btn-primary"
-                  onClick={() => handleContinue(hasPasskey)}
+                  onClick={() => handleContinue(false)}
                   disabled={isLoggingIn}
                 >
                   {isLoggingIn ? (
@@ -471,9 +587,33 @@ export default function LandingPage() {
                       <div className="aura-dots"><span /><span /><span /></div>
                     </>
                   ) : (
-                    <>{hasPasskey ? `AUTHENTICATE WITH ${platformLabel.toUpperCase()}` : 'CONTINUE'}<ArrowRight size={18} /></>
+                    <>CONTINUE<ArrowRight size={18} /></>
                   )}
                 </button>
+
+                {/* Secondary passkey option — only shown when this email has passkeys */}
+                {hasPasskeyForEmail && (
+                  <button
+                    onClick={() => handleContinue(true)}
+                    disabled={isLoggingIn}
+                    style={{
+                      width: '100%', padding: '10px 16px',
+                      background: 'transparent',
+                      border: '1px solid rgba(34,211,238,0.25)',
+                      borderRadius: '14px', color: '#22d3ee',
+                      fontFamily: 'Space Grotesk, sans-serif', fontSize: '13px',
+                      fontWeight: 500,
+                      cursor: isLoggingIn ? 'not-allowed' : 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                      transition: 'all 0.18s ease',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(34,211,238,0.08)'; e.currentTarget.style.borderColor = 'rgba(34,211,238,0.4)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'rgba(34,211,238,0.25)'; }}
+                  >
+                    <Fingerprint size={16} />
+                    Sign in with Passkey — {platformLabel}
+                  </button>
+                )}
 
                 {/* Security notice */}
                 <div style={{
@@ -484,6 +624,84 @@ export default function LandingPage() {
                     ⚠️ First time? You'll select your role after entering your email. Returning users are automatically restored to their previous session.
                   </p>
                 </div>
+
+                {/* Demo Access */}
+                {!showDemoAccess ? (
+                  <button
+                    onClick={() => setShowDemoAccess(true)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      fontFamily: 'JetBrains Mono, monospace', fontSize: '10px',
+                      letterSpacing: '0.08em', color: 'var(--aura-text-tech)',
+                      textAlign: 'center', padding: '4px 0',
+                      opacity: 0.6, transition: 'opacity 0.18s ease',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
+                    onMouseLeave={e => { e.currentTarget.style.opacity = '0.6'; }}
+                  >
+                    DEMO ACCESS
+                  </button>
+                ) : (
+                  <div style={{
+                    padding: '12px 14px', borderRadius: '12px',
+                    background: 'rgba(167,139,250,0.07)', border: '1px solid rgba(167,139,250,0.2)',
+                    display: 'flex', flexDirection: 'column', gap: '8px',
+                  }}>
+                    <p style={{ fontFamily: 'Space Grotesk, sans-serif', fontSize: '11px', color: 'rgba(167,139,250,0.85)', margin: 0 }}>
+                      Enter the demo passphrase to explore the full platform.
+                    </p>
+                    <input
+                      type="password"
+                      placeholder="Demo passphrase"
+                      value={demoPassphrase}
+                      onChange={e => { setDemoPassphrase(e.target.value); setDemoError(''); }}
+                      onKeyDown={e => e.key === 'Enter' && handleDemoLogin()}
+                      style={{
+                        width: '100%', padding: '8px 12px',
+                        background: 'var(--aura-bg-surface-1)',
+                        border: demoError ? '1px solid rgba(239,68,68,0.6)' : '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '10px', color: 'var(--aura-text-primary)',
+                        fontFamily: 'Space Grotesk, sans-serif', fontSize: '13px',
+                        outline: 'none', boxSizing: 'border-box',
+                      }}
+                    />
+                    {demoError && (
+                      <span style={{ fontFamily: 'Space Grotesk, sans-serif', fontSize: '11px', color: 'rgba(239,68,68,0.9)' }}>
+                        {demoError}
+                      </span>
+                    )}
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={handleDemoLogin}
+                        style={{
+                          flex: 1, padding: '8px 12px',
+                          background: 'rgba(167,139,250,0.15)', border: '1px solid rgba(167,139,250,0.3)',
+                          borderRadius: '10px', color: '#a78bfa',
+                          fontFamily: 'Space Grotesk, sans-serif', fontSize: '12px',
+                          fontWeight: 600, cursor: 'pointer', transition: 'all 0.18s ease',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(167,139,250,0.25)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(167,139,250,0.15)'; }}
+                      >
+                        Enter Demo
+                      </button>
+                      <button
+                        onClick={() => { setShowDemoAccess(false); setDemoPassphrase(''); setDemoError(''); }}
+                        style={{
+                          padding: '8px 12px',
+                          background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '10px', color: 'var(--aura-text-tech)',
+                          fontFamily: 'Space Grotesk, sans-serif', fontSize: '12px',
+                          cursor: 'pointer', transition: 'all 0.18s ease',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <p style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', letterSpacing: '0.1em', color: 'var(--aura-text-tech)', textAlign: 'center', lineHeight: 1.6 }}>
                   END-TO-END ENCRYPTED · FIDO2 CERTIFIED · ZERO KNOWLEDGE
@@ -519,7 +737,7 @@ export default function LandingPage() {
                 />
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {ROLES.map(({ role, icon: Icon, label, desc, color, defaultName, tier }) => (
+                  {ROLES.filter(r => r.role !== 'admin').map(({ role, icon: Icon, label, desc, color, defaultName, tier }) => (
                     <button
                       key={role}
                       onClick={() => selectRole(role, nameInput.trim() || defaultName, pendingEmail || emailInput.trim() || `${role}@nexus.io`, tier)}

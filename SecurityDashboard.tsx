@@ -1,4 +1,5 @@
-import { useGetDashboardData, useGetVaultEntries } from './hooks/useQueries';
+import { useMemo } from 'react';
+import { useGetDashboardData, useGetVaultEntries, useGetTeams } from './hooks/useQueries';
 import { generateSecurePassword } from './lib/crypto';
 import { loadPasskeys } from './lib/webauthn';
 import { useInternetIdentity } from './hooks/useInternetIdentity';
@@ -9,11 +10,12 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import AISecurityCoach from './AISecurityCoach';
-import { 
-  Shield, 
-  AlertTriangle, 
-  Key, 
-  Sparkles, 
+import { PinButton } from './CustomDashboard';
+import {
+  Shield,
+  AlertTriangle,
+  Key,
+  Sparkles,
   TrendingUp,
   CheckCircle2,
   Clock,
@@ -22,12 +24,17 @@ import {
   Wifi,
   ShieldCheck,
   Activity,
-  Zap
+  Zap,
+  Users,
+  RotateCw,
+  Target,
+  Lock
 } from 'lucide-react';
 
 export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: string) => void } = {}) {
   const { data: dashboardData, isLoading } = useGetDashboardData();
   const { data: vaultEntries } = useGetVaultEntries();
+  const { data: teams } = useGetTeams();
   const { session } = useInternetIdentity();
 
   const passkeys = loadPasskeys();
@@ -38,6 +45,121 @@ export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: 
   const recommendationsCount = dashboardData?.recommendations?.length || 0;
   const lastLoginTime = session ? new Date(session.loginAt).toLocaleTimeString() : '—';
   const lastLoginDate = session ? new Date(session.loginAt).toLocaleDateString() : '—';
+
+  const weakPasswordCount = dashboardData?.weakPasswords || 0;
+  const hasRotationIssues = (dashboardData?.recommendations ?? []).some(
+    (r) => r.category === 'Credential Rotation'
+  );
+  const hasMFA = passkeysActive > 0; // passkeys serve as MFA in this app
+  const hasTeams = (teams?.length ?? 0) > 0;
+
+  // Dynamic quick actions — prioritised by urgency, max 4 shown
+  interface QuickActionDef {
+    label: string;
+    description: string;
+    icon: typeof Key;
+    urgency: 'critical' | 'warning' | 'suggestion';
+    gradient: string;
+    borderClass: string;
+    onClick: () => void;
+  }
+
+  const dynamicActions = useMemo<QuickActionDef[]>(() => {
+    const actions: QuickActionDef[] = [];
+
+    if (passkeysActive === 0) {
+      actions.push({
+        label: 'Setup Passkey',
+        description: 'No passkeys registered — add one now',
+        icon: Key,
+        urgency: 'critical',
+        gradient: 'from-red-500/15 to-red-500/5',
+        borderClass: 'border-red-500/40',
+        onClick: () => onNavigate ? onNavigate('passkeys') : toast.info('Go to Passkeys tab to create a passkey'),
+      });
+    }
+
+    if (weakPasswordCount > 0) {
+      actions.push({
+        label: 'Fix Weak Passwords',
+        description: `${weakPasswordCount} weak password${weakPasswordCount !== 1 ? 's' : ''} found`,
+        icon: AlertTriangle,
+        urgency: 'critical',
+        gradient: 'from-red-500/15 to-red-500/5',
+        borderClass: 'border-red-500/40',
+        onClick: () => onNavigate ? onNavigate('vault') : toast.info('Go to Vault to fix weak passwords'),
+      });
+    }
+
+    if (!hasMFA) {
+      actions.push({
+        label: 'Enable MFA',
+        description: 'No multi-factor auth enrolled',
+        icon: Lock,
+        urgency: 'critical',
+        gradient: 'from-red-500/15 to-red-500/5',
+        borderClass: 'border-red-500/40',
+        onClick: () => onNavigate ? onNavigate('settings') : toast.info('Go to Settings to enable MFA'),
+      });
+    }
+
+    if (hasRotationIssues) {
+      actions.push({
+        label: 'Rotate Credentials',
+        description: 'Some credentials are overdue for rotation',
+        icon: RotateCw,
+        urgency: 'warning',
+        gradient: 'from-amber-500/15 to-amber-500/5',
+        borderClass: 'border-amber-500/40',
+        onClick: () => onNavigate ? onNavigate('threat') : toast.info('Go to Threats to review rotation issues'),
+      });
+    }
+
+    if (!hasTeams) {
+      actions.push({
+        label: 'Create Team',
+        description: 'Set up secure team sharing',
+        icon: Users,
+        urgency: 'suggestion',
+        gradient: 'from-green-500/15 to-green-500/5',
+        borderClass: 'border-green-500/40',
+        onClick: () => onNavigate ? onNavigate('team') : toast.info('Go to Team tab to create a team'),
+      });
+    }
+
+    if (securityScore < 70) {
+      actions.push({
+        label: 'Run Threat Scan',
+        description: 'Score is below 70 — scan for issues',
+        icon: Target,
+        urgency: 'warning',
+        gradient: 'from-amber-500/15 to-amber-500/5',
+        borderClass: 'border-amber-500/40',
+        onClick: () => onNavigate ? onNavigate('threat') : toast.info('Go to Threats to run a scan'),
+      });
+    }
+
+    // Always include Generate Password as a utility action
+    actions.push({
+      label: 'Generate Password',
+      description: 'Ultra-secure random password',
+      icon: ShieldCheck,
+      urgency: 'suggestion',
+      gradient: 'from-green-500/15 to-green-500/5',
+      borderClass: 'border-green-500/40',
+      onClick: () => {
+        const pw = generateSecurePassword(20, { upper: true, lower: true, digits: true, symbols: true });
+        navigator.clipboard.writeText(pw)
+          .then(() => toast.success('Copied secure password (20 chars)'))
+          .catch(() => toast.info(`Generated: ${pw}`));
+      },
+    });
+
+    // Sort by urgency priority then take top 4
+    const urgencyOrder = { critical: 0, warning: 1, suggestion: 2 };
+    actions.sort((a, b) => urgencyOrder[a.urgency] - urgencyOrder[b.urgency]);
+    return actions.slice(0, 4);
+  }, [passkeysActive, weakPasswordCount, hasMFA, hasRotationIssues, hasTeams, securityScore, onNavigate]);
 
   const getScoreColor = (score: number) => {
     if (score >= 80) return 'text-success';
@@ -51,12 +173,29 @@ export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: 
     return 'from-destructive/15 to-destructive/5';
   };
 
+  const getWelcomeGradient = (score: number) => {
+    if (score >= 80) return 'linear-gradient(135deg, rgba(34,197,94,0.15), rgba(34,197,94,0.05))';
+    if (score >= 60) return 'linear-gradient(135deg, rgba(245,158,11,0.18), rgba(245,158,11,0.06))';
+    return 'linear-gradient(135deg, rgba(239,68,68,0.18), rgba(239,68,68,0.06))';
+  };
+
+  const getWelcomeTextColor = (score: number) => {
+    if (score >= 80) return 'text-success';
+    if (score >= 60) return 'text-amber-400';
+    return 'text-destructive';
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Welcome Section */}
-      <div>
+      <div className="rounded-2xl p-6 border border-border/40" style={{ background: getWelcomeGradient(securityScore) }}>
         <h1 className="text-3xl font-bold mb-2">Welcome back!</h1>
-        <p className="text-muted-foreground">Your digital identity is {securityScore}% secure</p>
+        <p className={`${getWelcomeTextColor(securityScore)} font-medium`}>
+          Your digital identity is <span className="font-bold">{securityScore}%</span> secure
+          {securityScore < 60 && ' — immediate action recommended'}
+          {securityScore >= 60 && securityScore < 80 && ' — some improvements needed'}
+          {securityScore >= 80 && ' — looking great!'}
+        </p>
       </div>
 
       {/* Security Metrics Cards */}
@@ -82,14 +221,14 @@ export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: 
         />
         <MetricCard
           icon={Sparkles}
-          label="AI Protection"
-          value="Active"
-          color="accent"
+          label="MFA Status"
+          value={hasMFA ? 'Enabled' : 'Off'}
+          color={hasMFA ? 'accent' : 'warning'}
         />
       </div>
 
       {/* Main Security Score Card */}
-      <Card className={`border-border/40 glass-strong shadow-depth-lg card-tactile ${getScoreGradient(securityScore)} overflow-hidden relative`}>
+      <Card id="section-security-score" className={`border-border/40 glass-strong shadow-depth-lg card-tactile ${getScoreGradient(securityScore)} overflow-hidden relative`}>
         <div className="absolute inset-0 bg-grid-subtle opacity-40" />
         <CardHeader className="relative">
           <div className="flex items-center justify-between">
@@ -101,13 +240,16 @@ export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: 
                 {session ? `${session.role} · ${session.tier} · Last login: ${lastLoginDate} ${lastLoginTime}` : `Based on ${totalAccounts} accounts and security practices`}
               </CardDescription>
             </div>
-            <div className="text-right">
+            <div className="flex items-start gap-3">
+              <PinButton sectionId="security-score" principalId={session?.principalId ?? 'default'} />
+              <div className="text-right">
               <div className={`text-5xl font-bold ${getScoreColor(securityScore)}`}>
                 {securityScore}%
               </div>
               <div className="flex items-center gap-1 text-sm text-muted-foreground mt-1">
                 <TrendingUp className="h-4 w-4" />
                 <span>Security score</span>
+              </div>
               </div>
             </div>
           </div>
@@ -263,47 +405,31 @@ export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: 
         </Card>
       )}
 
-      {/* Quick Actions */}
-      <Card className="border-border/40 glass-strong shadow-depth-md card-tactile">
+      {/* Quick Actions — dynamic based on security state */}
+      <Card id="section-quick-actions" className="border-border/40 glass-strong shadow-depth-md card-tactile">
         <CardHeader>
-          <CardTitle>Quick Security Actions</CardTitle>
-          <CardDescription>Improve your security score with these recommended actions</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Quick Security Actions</CardTitle>
+              <CardDescription>Personalised actions based on your current security posture</CardDescription>
+            </div>
+            <PinButton sectionId="quick-actions" principalId={session?.principalId ?? 'default'} />
+          </div>
         </CardHeader>
         <CardContent>
           <div className="grid md:grid-cols-4 gap-4">
-            <QuickAction
-              label="Setup Passkey"
-              description="Passwordless login"
-              gradient="gradient-success"
-              icon={Key}
-              onClick={() => onNavigate ? onNavigate('passkeys') : toast.info('Go to Passkeys tab to create a passkey')}
-            />
-            <QuickAction
-              label="AI Security Scan"
-              description="Smart analysis"
-              gradient="gradient-primary"
-              icon={Sparkles}
-              onClick={() => onNavigate ? onNavigate('threat') : toast.info('Go to Threats tab to run a scan')}
-            />
-            <QuickAction
-              label="Generate Password"
-              description="Ultra-secure"
-              gradient="from-accent/15 to-accent/5"
-              icon={ShieldCheck}
-              onClick={() => {
-                const pw = generateSecurePassword(20, { upper: true, lower: true, digits: true, symbols: true });
-                navigator.clipboard.writeText(pw)
-                  .then(() => toast.success(`Copied secure password (20 chars)`))
-                  .catch(() => toast.info(`Generated: ${pw}`));
-              }}
-            />
-            <QuickAction
-              label="Team Sharing"
-              description="Secure access"
-              gradient="gradient-warning"
-              icon={Activity}
-              onClick={() => onNavigate ? onNavigate('team') : toast.info('Go to Team tab to manage shared vaults')}
-            />
+            {dynamicActions.map((action) => (
+              <QuickAction
+                key={action.label}
+                label={action.label}
+                description={action.description}
+                gradient={action.gradient}
+                borderClass={action.borderClass}
+                icon={action.icon}
+                urgency={action.urgency}
+                onClick={action.onClick}
+              />
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -405,12 +531,27 @@ function NetworkItem({ label, status, color }: any) {
   );
 }
 
-function QuickAction({ label, description, gradient, icon: Icon, onClick }: any) {
+function QuickAction({ label, description, gradient, borderClass, icon: Icon, onClick, urgency }: any) {
+  const urgencyDot = urgency === 'critical' ? 'bg-red-400' : urgency === 'warning' ? 'bg-amber-400' : 'bg-emerald-400';
+  const urgencyLabel = urgency === 'critical' ? 'Urgent' : urgency === 'warning' ? 'Recommended' : 'Suggested';
+  const iconColor = urgency === 'critical' ? 'text-red-400' : urgency === 'warning' ? 'text-amber-400' : 'text-primary';
+
   return (
-    <button onClick={onClick} className={`p-6 rounded-xl ${gradient} border border-border/40 shadow-depth-sm card-tactile text-left btn-press`}>
-      <Icon className="h-8 w-8 mb-3" />
-      <h4 className="font-semibold mb-1">{label}</h4>
-      <p className="text-xs opacity-80">{description}</p>
+    <button
+      onClick={onClick}
+      className={`relative p-5 rounded-xl glass-strong border ${borderClass || 'border-border/40'} shadow-depth-sm card-tactile text-left btn-press group transition-all hover:shadow-depth-md`}
+    >
+      <div className="flex items-center justify-between mb-3">
+        <div className="p-2.5 rounded-xl glass-effect shadow-depth-sm">
+          <Icon className={`h-5 w-5 ${iconColor}`} />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className={`h-1.5 w-1.5 rounded-full ${urgencyDot} ${urgency === 'critical' ? 'animate-pulse' : ''}`} />
+          <span className="text-[10px] text-white/30 uppercase tracking-wider font-medium">{urgencyLabel}</span>
+        </div>
+      </div>
+      <h4 className="font-semibold text-sm text-white/85 mb-0.5 group-hover:text-white/95 transition-colors">{label}</h4>
+      <p className="text-xs text-white/35">{description}</p>
     </button>
   );
 }

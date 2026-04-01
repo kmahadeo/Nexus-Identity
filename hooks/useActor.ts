@@ -3,6 +3,7 @@ import { HttpAgent, Actor } from '@dfinity/agent';
 import { AuthClient } from '@dfinity/auth-client';
 import { idlFactory } from '../src/declarations/backend/backend.did.js';
 import type { _SERVICE } from '../src/declarations/backend/backend.did.d.ts';
+import { logError } from '../lib/logger';
 
 // Canister IDs — updated by dfx deploy
 const BACKEND_CANISTER_ID =
@@ -38,7 +39,7 @@ async function buildActor(authClient: AuthClient): Promise<_SERVICE> {
 
   if (IS_LOCAL) {
     // Fetch root key in local dev — never on mainnet
-    await agent.fetchRootKey().catch(console.error);
+    await agent.fetchRootKey().catch((...args: unknown[]) => logError('fetchRootKey failed', ...args));
   }
 
   return Actor.createActor<_SERVICE>(idlFactory, {

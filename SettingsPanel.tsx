@@ -9,16 +9,40 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   Settings, Bell, Shield, Smartphone, Key, Plug, Sparkles,
   CheckCircle2, Trash2, Eye, EyeOff, Copy, ExternalLink,
-  RefreshCw, AlertCircle, Lock, User, Save,
+  RefreshCw, AlertCircle, Lock, User, Save, HelpCircle,
+  Globe, CreditCard, Camera, Upload, Link2, X,
 } from 'lucide-react';
+import MFASetup from './MFASetup';
+import { resetOnboarding } from './OnboardingFlow';
 import { toast } from 'sonner';
 import { settings as appSettings, type AppSettings, sessionStorage_, userRegistry, roleRegistry } from './lib/storage';
 import { loadPasskeys, deletePasskey } from './lib/webauthn';
 import { useInternetIdentity } from './hooks/useInternetIdentity';
 import { useQueryClient } from '@tanstack/react-query';
+import {
+  getGoogleConfig, setGoogleConfig,
+  getAppleConfig, setAppleConfig,
+  getStripeKey, setStripeKey,
+} from './lib/ssoConfig';
+
+/* ── Avatar localStorage helpers ──────────────────────────────────────── */
+const AVATAR_KEY = 'nexus-avatar';
+function getAvatar(principalId: string): string | null {
+  return localStorage.getItem(`${AVATAR_KEY}-${principalId}`);
+}
+function setAvatarStorage(principalId: string, dataUrl: string): void {
+  localStorage.setItem(`${AVATAR_KEY}-${principalId}`, dataUrl);
+}
+function removeAvatarStorage(principalId: string): void {
+  localStorage.removeItem(`${AVATAR_KEY}-${principalId}`);
+}
+
+const AVATAR_MAX_BYTES = 500 * 1024; // 500 KB
+const AVATAR_ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 export default function SettingsPanel() {
   const { session } = useInternetIdentity();
@@ -31,11 +55,81 @@ export default function SettingsPanel() {
   const [apiTestResult, setApiTestResult] = useState<'ok' | 'fail' | null>(null);
   const [passkeys, setPasskeys] = useState(() => loadPasskeys());
   const [profileName, setProfileName] = useState(() => sessionStorage_.get()?.name ?? '');
+
+  // Avatar state
+  const [avatarSrc, setAvatarSrc] = useState<string | null>(() =>
+    session?.principalId ? getAvatar(session.principalId) : null
+  );
+  const [avatarUrlDraft, setAvatarUrlDraft] = useState('');
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+
+  const getInitials = (name: string) =>
+    name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+
+  const handleAvatarFile = (file: File) => {
+    if (!session?.principalId) return;
+    if (!AVATAR_ACCEPTED_TYPES.includes(file.type)) {
+      toast.error('Invalid file type. Use JPG, PNG, or WebP.');
+      return;
+    }
+    if (file.size > AVATAR_MAX_BYTES) {
+      toast.error(`File too large (${(file.size / 1024).toFixed(0)}KB). Max 500KB.`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setAvatarStorage(session.principalId, dataUrl);
+      setAvatarSrc(dataUrl);
+      toast.success('Profile photo updated');
+    };
+    reader.onerror = () => toast.error('Failed to read file');
+    reader.readAsDataURL(file);
+  };
+
+  const handleAvatarUrl = () => {
+    if (!session?.principalId) return;
+    const url = avatarUrlDraft.trim();
+    if (!url) { toast.error('Enter a URL'); return; }
+    try { new URL(url); } catch { toast.error('Invalid URL'); return; }
+    setAvatarStorage(session.principalId, url);
+    setAvatarSrc(url);
+    setAvatarUrlDraft('');
+    setShowUrlInput(false);
+    toast.success('Profile photo updated from URL');
+  };
+
+  const removeAvatar = () => {
+    if (!session?.principalId) return;
+    removeAvatarStorage(session.principalId);
+    setAvatarSrc(null);
+    toast.success('Profile photo removed');
+  };
+
   const [linkedDevices] = useState([
     { id: '1', name: 'MacBook Pro', type: 'macOS', lastActive: '2 hours ago',  trusted: true },
     { id: '2', name: 'iPhone 15 Pro', type: 'iOS',   lastActive: '1 day ago',   trusted: true },
     { id: '3', name: 'iPad Air',    type: 'iOS',   lastActive: '3 days ago',  trusted: false },
   ]);
+
+  // SSO / Stripe config state
+  const [googleClientId, setGoogleClientIdState] = useState(() => getGoogleConfig());
+  const [appleClientId, setAppleClientIdState] = useState(() => getAppleConfig());
+  const [stripeKeyDraft, setStripeKeyDraft] = useState(() => getStripeKey());
+
+  const saveGoogleConfig = () => {
+    setGoogleConfig(googleClientId);
+    toast.success(googleClientId ? 'Google OAuth Client ID saved' : 'Google OAuth Client ID cleared');
+  };
+  const saveAppleConfig = () => {
+    setAppleConfig(appleClientId);
+    toast.success(appleClientId ? 'Apple Sign In Client ID saved' : 'Apple Sign In Client ID cleared');
+  };
+  const saveStripeConfig = () => {
+    setStripeKey(stripeKeyDraft);
+    toast.success(stripeKeyDraft ? 'Stripe publishable key saved' : 'Stripe key cleared');
+  };
 
   // Persist whenever cfg changes
   useEffect(() => { appSettings.set(cfg); }, [cfg]);
@@ -74,7 +168,7 @@ export default function SettingsPanel() {
     appSettings.set(updated);
     setCfg(updated);
     setApiKeyDraft('••••••••' + key.slice(-4));
-    toast.success('API key saved — AI Coach is now powered by Claude');
+    toast.success('API key saved — Security Advisor is now powered by Claude');
     queryClient.invalidateQueries();
   };
 
@@ -82,7 +176,7 @@ export default function SettingsPanel() {
     setCfg(prev => ({ ...prev, ai: { ...prev.ai, anthropicApiKey: '', enabled: true } }));
     setApiKeyDraft('');
     setApiTestResult(null);
-    toast.success('API key removed — AI Coach will use local responses');
+    toast.success('API key removed — Security Advisor will use local responses');
   };
 
   const testApiKey = async () => {
@@ -189,9 +283,10 @@ export default function SettingsPanel() {
           <TabsTrigger value="profile"><User className="h-4 w-4 mr-2" />Profile</TabsTrigger>
           <TabsTrigger value="notifications"><Bell className="h-4 w-4 mr-2" />Notifications</TabsTrigger>
           <TabsTrigger value="security"><Shield className="h-4 w-4 mr-2" />Security</TabsTrigger>
-          <TabsTrigger value="ai"><Sparkles className="h-4 w-4 mr-2" />AI Coach</TabsTrigger>
+          <TabsTrigger value="ai"><Sparkles className="h-4 w-4 mr-2" />Security Advisor</TabsTrigger>
           <TabsTrigger value="devices"><Smartphone className="h-4 w-4 mr-2" />Devices</TabsTrigger>
           <TabsTrigger value="passkeys"><Key className="h-4 w-4 mr-2" />Passkeys</TabsTrigger>
+          <TabsTrigger value="mfa"><Smartphone className="h-4 w-4 mr-2" />MFA</TabsTrigger>
           <TabsTrigger value="integrations"><Plug className="h-4 w-4 mr-2" />Integrations</TabsTrigger>
         </TabsList>
 
@@ -203,6 +298,111 @@ export default function SettingsPanel() {
               <CardDescription>Update your display name. Email cannot be changed as it is tied to your identity.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
+              {/* ── Avatar Section ── */}
+              <div className="space-y-3">
+                <Label>Profile Photo</Label>
+                <div className="flex items-start gap-5">
+                  {/* Avatar preview with camera overlay */}
+                  <div
+                    className={`relative group shrink-0 cursor-pointer rounded-full ${isDraggingOver ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : ''}`}
+                    onDragOver={e => { e.preventDefault(); setIsDraggingOver(true); }}
+                    onDragLeave={() => setIsDraggingOver(false)}
+                    onDrop={e => {
+                      e.preventDefault();
+                      setIsDraggingOver(false);
+                      const file = e.dataTransfer.files?.[0];
+                      if (file) handleAvatarFile(file);
+                    }}
+                    onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = '.jpg,.jpeg,.png,.webp';
+                      input.onchange = () => {
+                        const file = input.files?.[0];
+                        if (file) handleAvatarFile(file);
+                      };
+                      input.click();
+                    }}
+                  >
+                    <Avatar className="h-20 w-20" style={{ border: '2px solid rgba(255,255,255,0.1)' }}>
+                      {avatarSrc ? (
+                        <AvatarImage src={avatarSrc} alt="Profile" className="object-cover" />
+                      ) : null}
+                      <AvatarFallback className="bg-white/5 text-white/70 text-lg font-semibold font-mono">
+                        {session ? getInitials(session.name) : 'U'}
+                      </AvatarFallback>
+                    </Avatar>
+                    {/* Camera icon overlay on hover */}
+                    <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Camera className="h-5 w-5 text-white/80" />
+                    </div>
+                  </div>
+
+                  {/* Controls */}
+                  <div className="flex-1 space-y-2.5 pt-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-full btn-press text-xs"
+                        onClick={() => {
+                          const input = document.createElement('input');
+                          input.type = 'file';
+                          input.accept = '.jpg,.jpeg,.png,.webp';
+                          input.onchange = () => {
+                            const file = input.files?.[0];
+                            if (file) handleAvatarFile(file);
+                          };
+                          input.click();
+                        }}
+                      >
+                        <Upload className="h-3.5 w-3.5 mr-1.5" />Upload Photo
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-full btn-press text-xs"
+                        onClick={() => setShowUrlInput(!showUrlInput)}
+                      >
+                        <Link2 className="h-3.5 w-3.5 mr-1.5" />Use URL
+                      </Button>
+                      {avatarSrc && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="rounded-full btn-press text-xs text-destructive hover:text-destructive"
+                          onClick={removeAvatar}
+                        >
+                          <X className="h-3.5 w-3.5 mr-1.5" />Remove
+                        </Button>
+                      )}
+                    </div>
+
+                    {/* URL input */}
+                    {showUrlInput && (
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="https://gravatar.com/avatar/... or any image URL"
+                          value={avatarUrlDraft}
+                          onChange={e => setAvatarUrlDraft(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleAvatarUrl()}
+                          className="glass-effect text-xs"
+                        />
+                        <Button onClick={handleAvatarUrl} size="sm" className="rounded-full btn-press shrink-0">
+                          <Save className="h-3.5 w-3.5 mr-1.5" />Set
+                        </Button>
+                      </div>
+                    )}
+
+                    <p className="text-[11px] text-muted-foreground">
+                      Max 500KB, JPG/PNG/WebP. Drag and drop or click the avatar to upload.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
               <div className="space-y-2">
                 <Label htmlFor="display-name">Display Name</Label>
                 <div className="flex gap-2">
@@ -263,7 +463,7 @@ export default function SettingsPanel() {
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Categories</h3>
                 <SettingRow label="Security Alerts" desc="Critical security issues and threats" checked={cfg.notifications.security} onChange={v => patchNotif('security', v)} />
                 <SettingRow label="Account Activity" desc="Login attempts and profile changes" checked={cfg.notifications.account} onChange={v => patchNotif('account', v)} />
-                <SettingRow label="AI Insights" desc="Security recommendations from the AI Coach" checked={cfg.notifications.aiInsights} onChange={v => patchNotif('aiInsights', v)} />
+                <SettingRow label="AI Insights" desc="Security recommendations from the Security Advisor" checked={cfg.notifications.aiInsights} onChange={v => patchNotif('aiInsights', v)} />
                 <SettingRow label="Billing Updates" desc="Payment and subscription notifications" checked={cfg.notifications.billing} onChange={v => patchNotif('billing', v)} />
               </div>
               <Separator />
@@ -310,9 +510,51 @@ export default function SettingsPanel() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Post-Quantum Cryptography Readiness */}
+          <Card className="border-border/40 glass-strong shadow-depth-md">
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-violet-400/10"><Shield className="h-5 w-5 text-violet-400" /></div>
+                <div>
+                  <CardTitle className="text-base">Post-Quantum Cryptography</CardTitle>
+                  <CardDescription>Crypto-agile architecture ready for NIST PQC standards</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: 'Data at Rest', algo: 'AES-256-GCM', standard: 'FIPS 197', safe: true, note: 'Quantum-safe (256-bit symmetric)' },
+                  { label: 'Key Derivation', algo: 'PBKDF2-SHA-256', standard: 'SP 800-132', safe: true, note: '310k iterations, quantum-safe' },
+                  { label: 'HMAC (TOTP)', algo: 'HMAC-SHA-1', standard: 'RFC 2104', safe: true, note: '~80-bit post-quantum (acceptable)' },
+                  { label: 'Passkey Signatures', algo: 'ECDSA P-256', standard: 'FIDO2', safe: false, note: 'PQC migration pending (FIDO Alliance)' },
+                  { label: 'TLS Transport', algo: 'X25519MLKEM768', standard: 'Hybrid PQC', safe: true, note: 'Active in Chrome 131+ / Firefox 132+' },
+                  { label: 'Architecture', algo: 'Crypto-Agile', standard: 'Internal', safe: true, note: 'Algorithm-tagged payloads, hot-swappable' },
+                ].map(item => (
+                  <div key={item.label} className="p-3 rounded-lg glass-effect border border-border/40">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-white/50">{item.label}</span>
+                      <Badge variant="secondary" className={`text-[10px] ${item.safe ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {item.safe ? 'Quantum Safe' : 'Migration Pending'}
+                      </Badge>
+                    </div>
+                    <p className="text-sm font-medium text-white/80 font-mono">{item.algo}</p>
+                    <p className="text-[10px] text-white/30 mt-0.5">{item.standard} · {item.note}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="p-3 rounded-lg glass-effect text-xs text-white/30 space-y-1">
+                <p className="flex items-center gap-1.5"><CheckCircle2 className="h-3 w-3 text-emerald-400" /> All symmetric encryption is quantum-resistant (AES-256)</p>
+                <p className="flex items-center gap-1.5"><CheckCircle2 className="h-3 w-3 text-emerald-400" /> Algorithm metadata stored with every encrypted payload for seamless migration</p>
+                <p className="flex items-center gap-1.5"><CheckCircle2 className="h-3 w-3 text-emerald-400" /> Ready for FIPS 203 (ML-KEM) hybrid encryption when browser support arrives</p>
+                <p className="flex items-center gap-1.5"><AlertCircle className="h-3 w-3 text-amber-400" /> FIDO2 passkeys use ECDSA — PQC signatures expected 2028+ per FIDO Alliance roadmap</p>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
-        {/* ── AI Coach ── */}
+        {/* ── Security Advisor ── */}
         <TabsContent value="ai" className="space-y-6">
           <Card className="border-border/40 glass-strong shadow-depth-md gradient-primary">
             <CardHeader>
@@ -551,41 +793,167 @@ export default function SettingsPanel() {
           </Card>
         </TabsContent>
 
+        {/* ── MFA ── */}
+        <TabsContent value="mfa" className="space-y-6">
+          <MFASetup />
+          {/* Restart onboarding */}
+          <div className="flex justify-end">
+            <button
+              onClick={() => { resetOnboarding(); window.location.reload(); }}
+              className="text-xs text-white/25 hover:text-white/50 transition-colors flex items-center gap-1.5"
+            >
+              <HelpCircle className="h-3.5 w-3.5" />Restart onboarding walkthrough
+            </button>
+          </div>
+        </TabsContent>
+
         {/* ── Integrations ── */}
         <TabsContent value="integrations" className="space-y-6">
+          {/* SSO Configuration */}
           <Card className="border-border/40 glass-strong shadow-depth-md">
             <CardHeader>
-              <CardTitle>Identity Provider Connections</CardTitle>
-              <CardDescription>SSO integrations and federated identity providers</CardDescription>
+              <CardTitle>SSO & Billing Configuration</CardTitle>
+              <CardDescription>Configure Google, Apple SSO and Stripe billing. These keys are stored locally in your browser.</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {[
-                  { name: 'Okta',               status: 'connected',     lastSync: '5 minutes ago' },
-                  { name: 'Microsoft Entra ID', status: 'connected',     lastSync: '1 hour ago'    },
-                  { name: 'Auth0',              status: 'disconnected',  lastSync: 'Never'         },
-                  { name: 'Ping Identity',      status: 'disconnected',  lastSync: 'Never'         },
-                ].map(p => (
-                  <div key={p.name} className="p-4 rounded-xl border border-border/40 glass-effect shadow-depth-sm card-tactile">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2.5 rounded-xl bg-primary/10 shadow-depth-sm"><Plug className="h-5 w-5 text-primary" /></div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <h4 className="font-semibold text-sm">{p.name}</h4>
-                          <Badge variant={p.status === 'connected' ? 'default' : 'secondary'} className="text-xs">{p.status}</Badge>
-                        </div>
-                        <p className="text-xs text-muted-foreground">Last sync: {p.lastSync}</p>
-                      </div>
-                      <Button
-                        variant="ghost" size="sm"
-                        onClick={() => toast.info(p.status === 'connected' ? `${p.name} disconnected` : `${p.name} OAuth flow would open here`)}
-                        className="rounded-full btn-press shrink-0 text-xs"
-                      >
-                        {p.status === 'connected' ? 'Disconnect' : 'Connect'}
-                      </Button>
-                    </div>
+            <CardContent className="space-y-6">
+              {/* Google OAuth */}
+              <div className="p-4 rounded-xl border border-border/40 glass-effect shadow-depth-sm space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-blue-500/10 shadow-depth-sm">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" className="shrink-0">
+                      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+                      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18A10.96 10.96 0 001 12c0 1.77.42 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+                      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                    </svg>
                   </div>
-                ))}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <h4 className="font-semibold text-sm">Google OAuth</h4>
+                      <Badge
+                        variant={googleClientId ? 'default' : 'secondary'}
+                        className="text-xs"
+                      >
+                        {googleClientId ? 'Configured' : 'Not configured'}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Enable "Continue with Google" on the login page</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Google OAuth Client ID (e.g., 123456.apps.googleusercontent.com)"
+                    value={googleClientId}
+                    onChange={e => setGoogleClientIdState(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && saveGoogleConfig()}
+                    className="glass-effect text-xs font-mono"
+                  />
+                  <Button onClick={saveGoogleConfig} size="sm" className="rounded-full btn-press shrink-0">
+                    <Save className="h-3.5 w-3.5 mr-1.5" />Save
+                  </Button>
+                </div>
+              </div>
+
+              {/* Apple Sign In */}
+              <div className="p-4 rounded-xl border border-border/40 glass-effect shadow-depth-sm space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-white/10 shadow-depth-sm">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="text-white/80 shrink-0">
+                      <path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.4C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/>
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <h4 className="font-semibold text-sm">Apple Sign In</h4>
+                      <Badge
+                        variant={appleClientId ? 'default' : 'secondary'}
+                        className="text-xs"
+                      >
+                        {appleClientId ? 'Configured' : 'Not configured'}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Enable "Continue with Apple" on the login page</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Apple Services ID (e.g., com.example.signin)"
+                    value={appleClientId}
+                    onChange={e => setAppleClientIdState(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && saveAppleConfig()}
+                    className="glass-effect text-xs font-mono"
+                  />
+                  <Button onClick={saveAppleConfig} size="sm" className="rounded-full btn-press shrink-0">
+                    <Save className="h-3.5 w-3.5 mr-1.5" />Save
+                  </Button>
+                </div>
+              </div>
+
+              {/* Stripe */}
+              <div className="p-4 rounded-xl border border-border/40 glass-effect shadow-depth-sm space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-violet-500/10 shadow-depth-sm">
+                    <CreditCard className="h-5 w-5 text-violet-400 shrink-0" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <h4 className="font-semibold text-sm">Stripe Billing</h4>
+                      <Badge
+                        variant={stripeKeyDraft ? 'default' : 'secondary'}
+                        className="text-xs"
+                      >
+                        {stripeKeyDraft ? 'Configured' : 'Not configured'}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Enable real payment processing on the Billing page</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Stripe Publishable Key (pk_test_... or pk_live_...)"
+                    value={stripeKeyDraft}
+                    onChange={e => setStripeKeyDraft(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && saveStripeConfig()}
+                    className="glass-effect text-xs font-mono"
+                  />
+                  <Button onClick={saveStripeConfig} size="sm" className="rounded-full btn-press shrink-0">
+                    <Save className="h-3.5 w-3.5 mr-1.5" />Save
+                  </Button>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Identity Provider Connections</h3>
+                <div className="space-y-3">
+                  {[
+                    { name: 'Okta',               status: 'connected',     lastSync: '5 minutes ago' },
+                    { name: 'Microsoft Entra ID', status: 'connected',     lastSync: '1 hour ago'    },
+                    { name: 'Auth0',              status: 'disconnected',  lastSync: 'Never'         },
+                    { name: 'Ping Identity',      status: 'disconnected',  lastSync: 'Never'         },
+                  ].map(p => (
+                    <div key={p.name} className="p-4 rounded-xl border border-border/40 glass-effect shadow-depth-sm card-tactile">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 rounded-xl bg-primary/10 shadow-depth-sm"><Plug className="h-5 w-5 text-primary" /></div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <h4 className="font-semibold text-sm">{p.name}</h4>
+                            <Badge variant={p.status === 'connected' ? 'default' : 'secondary'} className="text-xs">{p.status}</Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground">Last sync: {p.lastSync}</p>
+                        </div>
+                        <Button
+                          variant="ghost" size="sm"
+                          onClick={() => toast.info(p.status === 'connected' ? `${p.name} disconnected` : `${p.name} OAuth flow would open here`)}
+                          className="rounded-full btn-press shrink-0 text-xs"
+                        >
+                          {p.status === 'connected' ? 'Disconnect' : 'Connect'}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </CardContent>
           </Card>

@@ -1,12 +1,17 @@
 import { useGetVaultEntries, useGetRecommendations, useGetPasskeyCount, useGetTeams } from '../hooks/useQueries';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { Sparkles, AlertTriangle, CheckCircle2, Shield, Brain, Eye } from 'lucide-react';
-import { computeSecurityScore, generateInsights, type SecurityState } from '../lib/securityEngine';
+import { AlertTriangle, CheckCircle2, Shield, Brain, Eye, ArrowRight, TrendingUp, TrendingDown } from 'lucide-react';
+import { computeSecurityScore, computeScoreBreakdown, generateInsights, type SecurityState, type SecurityInsight } from '../lib/securityEngine';
 import type { SecurityRecommendation } from '../backend';
 
-export default function AISecurityCoach() {
+interface AISecurityCoachProps {
+  onNavigate?: (view: string) => void;
+}
+
+export default function AISecurityCoach({ onNavigate }: AISecurityCoachProps) {
   const { data: vaultEntries = [], isLoading: vaultLoading } = useGetVaultEntries();
   const { data: recommendations = [] } = useGetRecommendations();
   const { data: passkeyCount = 0 } = useGetPasskeyCount();
@@ -20,6 +25,7 @@ export default function AISecurityCoach() {
   };
 
   const score = computeSecurityScore(state);
+  const breakdown = computeScoreBreakdown(state);
   const insights = generateInsights(state);
 
   const criticalInsights = insights.filter((i) => i.priority === 'critical');
@@ -30,22 +36,25 @@ export default function AISecurityCoach() {
     (a, b) => Number(b.priority) - Number(a.priority),
   );
 
+  const positiveBreakdown = breakdown.filter((b) => b.positive && b.points > 0);
+  const negativeBreakdown = breakdown.filter((b) => !b.positive);
+
   return (
     <Card className="border-border/40 glass-strong shadow-depth-md card-tactile">
       <CardHeader>
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-gradient-to-br from-primary/20 to-accent/10 shadow-depth-sm glow-primary-soft">
-            <Sparkles className="h-5 w-5 text-primary" />
+            <Shield className="h-5 w-5 text-primary" />
           </div>
           <div className="flex-1">
-            <CardTitle className="text-lg">Security Coach</CardTitle>
+            <CardTitle className="text-lg">Security Advisor</CardTitle>
             <CardDescription className="text-xs flex items-center gap-1">
               <Brain className="h-3 w-3" />
-              Client-side rule engine &bull; Real-time analysis
+              Rule-based analysis engine &bull; Real-time
             </CardDescription>
           </div>
           <Badge variant="secondary" className="text-xs">
-            Score: {score}
+            {score}/100
           </Badge>
         </div>
       </CardHeader>
@@ -64,10 +73,33 @@ export default function AISecurityCoach() {
           </div>
         </div>
 
+        {/* Score breakdown */}
+        <div className="p-3 rounded-xl glass-effect border border-border/40 space-y-2">
+          <span className="text-xs font-semibold text-muted-foreground">Score Breakdown</span>
+          {positiveBreakdown.map((item) => (
+            <div key={item.label} className="flex items-center justify-between text-xs">
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <TrendingUp className="h-3 w-3 text-success" />
+                {item.label}
+              </span>
+              <span className="text-success font-medium">+{item.points}</span>
+            </div>
+          ))}
+          {negativeBreakdown.map((item) => (
+            <div key={item.label} className="flex items-center justify-between text-xs">
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <TrendingDown className="h-3 w-3 text-destructive" />
+                {item.label}
+              </span>
+              <span className="text-destructive font-medium">{item.points}</span>
+            </div>
+          ))}
+        </div>
+
         {vaultLoading ? (
           <div className="text-center py-8">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary/30 border-t-primary mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">Loading data...</p>
+            <p className="text-sm text-muted-foreground">Analyzing security data...</p>
           </div>
         ) : insights.length === 1 && insights[0].id === 'all-good' ? (
           <div className="text-center py-8">
@@ -85,14 +117,17 @@ export default function AISecurityCoach() {
           </div>
         ) : (
           <>
+            <div className="space-y-1">
+              <span className="text-xs font-semibold text-muted-foreground">Recommendations by Impact</span>
+            </div>
             {criticalInsights.length > 0 && (
-              <InsightGroup label="Critical" insights={criticalInsights} icon={AlertTriangle} color="destructive" />
+              <InsightGroup label="Critical" insights={criticalInsights} icon={AlertTriangle} color="destructive" onNavigate={onNavigate} />
             )}
             {highInsights.length > 0 && (
-              <InsightGroup label="High" insights={highInsights} icon={AlertTriangle} color="warning" />
+              <InsightGroup label="High" insights={highInsights} icon={AlertTriangle} color="warning" onNavigate={onNavigate} />
             )}
             {mediumInsights.length > 0 && (
-              <InsightGroup label="Medium" insights={mediumInsights} icon={Shield} color="primary" />
+              <InsightGroup label="Medium" insights={mediumInsights} icon={Shield} color="primary" onNavigate={onNavigate} />
             )}
           </>
         )}
@@ -111,11 +146,11 @@ export default function AISecurityCoach() {
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Brain className="h-3 w-3" />
-              Client-side rule engine
+              Local rule-based engine
             </span>
             <span className="flex items-center gap-1">
               <Eye className="h-3 w-3" />
-              No external API calls
+              No data leaves your browser
             </span>
           </div>
         </div>
@@ -129,11 +164,13 @@ function InsightGroup({
   insights,
   icon: Icon,
   color,
+  onNavigate,
 }: {
   label: string;
-  insights: { id: string; message: string }[];
+  insights: SecurityInsight[];
   icon: typeof AlertTriangle;
   color: string;
+  onNavigate?: (view: string) => void;
 }) {
   return (
     <div className="space-y-2">
@@ -150,6 +187,31 @@ function InsightGroup({
           className="p-3 rounded-xl border border-border/40 glass-effect shadow-depth-sm card-tactile"
         >
           <p className="text-xs leading-relaxed">{insight.message}</p>
+          {insight.affectedEntries && insight.affectedEntries.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {insight.affectedEntries.slice(0, 3).map((name) => (
+                <Badge key={name} variant="outline" className="text-[10px] px-1.5 py-0">
+                  {name}
+                </Badge>
+              ))}
+              {insight.affectedEntries.length > 3 && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                  +{insight.affectedEntries.length - 3} more
+                </Badge>
+              )}
+            </div>
+          )}
+          {insight.navigateTo && onNavigate && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-2 h-7 text-xs px-2 hover:bg-primary/10"
+              onClick={() => onNavigate(insight.navigateTo!)}
+            >
+              Fix Now
+              <ArrowRight className="h-3 w-3 ml-1" />
+            </Button>
+          )}
         </div>
       ))}
     </div>

@@ -6,7 +6,7 @@ export type UserRole = 'admin' | 'developer' | 'viewer';
 export interface IdentityProfile {
   id: string; // DID (Decentralized ID) or UUID
   email: string;
-  riskScore: number; // Dynamic score updated by AI Coach
+  riskScore: number; // Dynamic score updated by Security Advisor
   mfaMethods: Authenticator[];
   
   // The "Graph" Links

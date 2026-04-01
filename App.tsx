@@ -1,26 +1,92 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useInternetIdentity } from './hooks/useInternetIdentity';
 import { Toaster } from '@/components/ui/sonner';
 import { useTenant } from './TenantContext';
 import NexusLogo from './NexusLogo';
 import LandingPage from './LandingPage';
 import MainApp from './MainApp';
-import { callbackStorage } from './lib/oauth';
+import { callbackStorage, pkceStorage } from './lib/oauth';
+import { roleRegistry } from './lib/storage';
+import { toast } from 'sonner';
+
+/** Decode a JWT payload (no signature verification — just parse). */
+function decodeJwtPayload(token: string): Record<string, any> | null {
+  try {
+    const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(base64));
+  } catch { return null; }
+}
 
 export default function App() {
-  const { isInitializing, loginStatus, session } = useInternetIdentity();
-  const { tier } = useTenant();
+  const { isInitializing, loginStatus, session, selectRole, loginWithEmail } = useInternetIdentity();
+  const { tier, setTier } = useTenant();
+  const oauthHandled = useRef(false);
 
-  // Capture OAuth2 callback params before client-side routing cleans the URL
+  // Handle OAuth callbacks — supports both:
+  //   1. Implicit flow: #id_token=...&state=... (Google GIS)
+  //   2. Auth code flow: ?code=...&state=... (Okta, Entra, Apple)
   useEffect(() => {
+    if (oauthHandled.current) return;
+
+    // Check URL fragment first (implicit flow — Google)
+    const hash = window.location.hash.substring(1);
+    if (hash) {
+      const fragParams = new URLSearchParams(hash);
+      const idToken = fragParams.get('id_token');
+      const fragState = fragParams.get('state');
+
+      if (idToken && fragState) {
+        oauthHandled.current = true;
+        window.history.replaceState({}, '', window.location.pathname);
+
+        // Verify state matches what we saved
+        const saved = pkceStorage.get();
+        if (!saved || saved.state !== fragState) {
+          toast.error('OAuth state mismatch — please try again');
+          pkceStorage.clear();
+          return;
+        }
+
+        // Decode the id_token to get user profile
+        const payload = decodeJwtPayload(idToken);
+        pkceStorage.clear();
+
+        if (payload?.email) {
+          const email = payload.email.trim().toLowerCase();
+          const existing = roleRegistry.get(email);
+
+          if (existing) {
+            // Returning user — restore their saved role and tier (never auto-escalate)
+            selectRole(existing.role, existing.name, email, existing.tier);
+            setTier(existing.tier);
+            toast.success(`Welcome back, ${existing.name}!`);
+          } else {
+            // New SSO user — default to individual role + individual tier
+            const name = payload.name || email.split('@')[0];
+            selectRole('individual', name, email, 'individual');
+            setTier('individual');
+            toast.success(`Welcome, ${name}!`);
+          }
+        } else {
+          toast.error('Could not read profile from Google — please try again');
+        }
+        return;
+      }
+    }
+
+    // Check query params (authorization code flow — Okta, Entra, Apple)
     const url = new URL(window.location.href);
     const code  = url.searchParams.get('code');
     const state = url.searchParams.get('state');
     if (code && state) {
+      oauthHandled.current = true;
       callbackStorage.save(code, state);
       window.history.replaceState({}, '', window.location.pathname);
+      // Code flow requires backend token exchange — show info
+      toast.info('Authorization code received — backend token exchange needed');
+      pkceStorage.clear();
     }
-  }, []);
+  }, [selectRole, loginWithEmail, setTier]);
 
   // Only considered authenticated once role selection is complete
   const isAuthenticated = loginStatus === 'logged-in';

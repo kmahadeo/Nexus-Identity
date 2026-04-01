@@ -14,6 +14,9 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Plus, Lock, Key, CreditCard, FileText, Trash2, Eye, EyeOff, Shield, AlertTriangle, CheckCircle2, RefreshCw, Smartphone, Cloud, Sparkles, Copy, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import type { VaultEntry } from '../backend';
+import { enforcePolicy } from '../../../lib/permissions';
+import { logAuditEvent } from '../../../lib/auditLog';
+import { sessionStorage_ } from '../../../lib/storage';
 
 const CATEGORIES = [
   { value: 'password', label: 'Password', icon: Lock },
@@ -429,7 +432,42 @@ export default function VaultView({ onNavigate }: VaultViewProps) {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => setViewingEntry(isViewing ? null : entry.id)}
+                                  onClick={() => {
+                                    if (!isViewing) {
+                                      // Enforce MFA policy before revealing secrets
+                                      const session = sessionStorage_.get();
+                                      const mfaCheck = enforcePolicy('vault.entry.view_secret', {
+                                        hasMFA: passkeys.length > 0,
+                                        passkeyCount: passkeys.length,
+                                        role: session?.role,
+                                        sessionLoginAt: session?.loginAt,
+                                      });
+                                      if (!mfaCheck.allowed) {
+                                        if (mfaCheck.enforcement === 'block') {
+                                          toast.error(mfaCheck.reason ?? 'Access denied by policy');
+                                          logAuditEvent({
+                                            action: 'vault.entry.view_secret',
+                                            resource: entry.id,
+                                            resourceType: 'vault_entry',
+                                            details: `Blocked: ${mfaCheck.reason}`,
+                                            result: 'denied',
+                                          });
+                                          return;
+                                        }
+                                        if (mfaCheck.enforcement === 'warn') {
+                                          toast.warning(mfaCheck.reason ?? 'Policy warning');
+                                        }
+                                      }
+                                      logAuditEvent({
+                                        action: 'vault.entry.view_secret',
+                                        resource: entry.id,
+                                        resourceType: 'vault_entry',
+                                        details: `Viewed secret: ${entry.name}`,
+                                        result: 'success',
+                                      });
+                                    }
+                                    setViewingEntry(isViewing ? null : entry.id);
+                                  }}
                                   className="h-8 px-3 rounded-full btn-press"
                                 >
                                   {isViewing ? (

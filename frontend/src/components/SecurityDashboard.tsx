@@ -215,8 +215,8 @@ export default function SecurityDashboard({ onNavigate }: SecurityDashboardProps
           </CardContent>
         </Card>
 
-        {/* AI Security Assistant */}
-        <AISecurityCoach />
+        {/* Security Advisor */}
+        <AISecurityCoach onNavigate={onNavigate} />
       </div>
 
       <div className="grid md:grid-cols-2 gap-6">

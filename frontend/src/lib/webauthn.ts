@@ -36,32 +36,49 @@ export interface PasskeyResult {
 export async function createPasskey(
   userId: string,
   userName: string,
+  existingCredentialIds?: string[],
 ): Promise<PasskeyResult> {
   const challenge = crypto.getRandomValues(new Uint8Array(32));
   const userIdBuffer = new TextEncoder().encode(userId);
 
-  const credential = (await navigator.credentials.create({
-    publicKey: {
-      rp: { name: RP_NAME, id: RP_ID },
-      user: {
-        id: userIdBuffer,
-        name: userName,
-        displayName: userName,
+  // Build excludeCredentials to prevent duplicate registrations on the same authenticator
+  const excludeCredentials: PublicKeyCredentialDescriptor[] = (existingCredentialIds ?? []).map(id => ({
+    id: base64urlToBuffer(id),
+    type: 'public-key' as const,
+    transports: ['internal'] as AuthenticatorTransport[],
+  }));
+
+  let credential: PublicKeyCredential | null;
+  try {
+    credential = (await navigator.credentials.create({
+      publicKey: {
+        rp: { name: RP_NAME, id: RP_ID },
+        user: {
+          id: userIdBuffer,
+          name: userName,
+          displayName: userName,
+        },
+        challenge,
+        pubKeyCredParams: [
+          { alg: -7, type: 'public-key' },   // ES256
+          { alg: -257, type: 'public-key' },  // RS256
+        ],
+        excludeCredentials,
+        authenticatorSelection: {
+          authenticatorAttachment: 'platform',
+          residentKey: 'preferred',
+          userVerification: 'preferred',
+        },
+        timeout: 60000,
+        attestation: 'none',
       },
-      challenge,
-      pubKeyCredParams: [
-        { alg: -7, type: 'public-key' },   // ES256
-        { alg: -257, type: 'public-key' },  // RS256
-      ],
-      authenticatorSelection: {
-        authenticatorAttachment: 'platform',
-        residentKey: 'preferred',
-        userVerification: 'preferred',
-      },
-      timeout: 60000,
-      attestation: 'none',
-    },
-  })) as PublicKeyCredential | null;
+    })) as PublicKeyCredential | null;
+  } catch (err: any) {
+    if (err?.name === 'InvalidStateError') {
+      throw new Error('A passkey already exists on this device');
+    }
+    throw err;
+  }
 
   if (!credential) throw new Error('Passkey creation cancelled');
 

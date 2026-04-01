@@ -43,7 +43,8 @@ export default function PasskeysView() {
     setIsCreating(true);
     try {
       const userId = identity?.getPrincipal().toText() || 'anonymous';
-      const result = await createPasskey(userId, userId);
+      const existingIds = passkeys.map((p) => p.credentialId);
+      const result = await createPasskey(userId, userId, existingIds);
 
       const credential: PasskeyCredential = {
         credentialId: result.credentialId,
@@ -57,7 +58,9 @@ export default function PasskeysView() {
       await addPasskey(credential);
       toast.success('Passkey created and stored on-chain');
     } catch (error: any) {
-      if (error?.name === 'NotAllowedError') {
+      if (error?.message?.includes('already exists')) {
+        toast.warning('A passkey is already registered on this device. You can manage it below.');
+      } else if (error?.name === 'NotAllowedError') {
         toast.error('Passkey creation was cancelled');
       } else {
         toast.error(error?.message || 'Failed to create passkey');
@@ -184,6 +187,9 @@ export default function PasskeysView() {
                     <>
                       <Key className="h-4 w-4 mr-2" />
                       Create Passkey
+                      {passkeys.length > 0 && (
+                        <Badge variant="secondary" className="ml-2 text-xs">{passkeys.length}</Badge>
+                      )}
                     </>
                   )}
                 </Button>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -7,11 +7,11 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Key, Fingerprint, Shield, CheckCircle2, Smartphone, Laptop, AlertCircle,
-  Zap, Lock, Globe, Trash2, RefreshCw, Copy, Clock, Cpu,
+  Zap, Lock, Globe, Trash2, RefreshCw, Copy, Clock, Cpu, Pencil, Check, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  loadPasskeys, deletePasskey, registerPasskey, authenticatePasskey,
+  loadPasskeys, deletePasskey, renamePasskey, registerPasskey, authenticatePasskey,
   isWebAuthnAvailable, isPlatformAuthenticatorAvailable,
   type StoredPasskey,
 } from './lib/webauthn';
@@ -28,6 +28,9 @@ export default function PasskeysView() {
   const [isCreating, setIsCreating]       = useState(false);
   const [isAuthing, setIsAuthing]         = useState(false);
   const [lastAuthResult, setLastAuthResult] = useState<'success' | 'fail' | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const editInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setPasskeys(loadPasskeys());
@@ -53,7 +56,9 @@ export default function PasskeysView() {
       toast.success(`Passkey "${stored.name}" registered successfully`);
     } catch (err: any) {
       const msg = err?.message ?? 'Passkey creation failed.';
-      if (msg.includes('cancel') || msg.includes('abort')) {
+      if (msg.includes('already exists')) {
+        toast.warning('A passkey is already registered on this device. You can manage it below.');
+      } else if (msg.includes('cancel') || msg.includes('abort')) {
         toast.info('Passkey creation was cancelled.');
       } else {
         toast.error(msg);
@@ -93,6 +98,30 @@ export default function PasskeysView() {
     reload();
     refetchDash();
     toast.success(`Passkey "${name}" revoked`);
+  };
+
+  /* ── Rename passkey ── */
+  const startRename = (pk: StoredPasskey) => {
+    setEditingId(pk.id);
+    setEditName(pk.name);
+    setTimeout(() => editInputRef.current?.focus(), 50);
+  };
+
+  const commitRename = () => {
+    if (!editingId) return;
+    const trimmed = editName.trim();
+    if (trimmed && trimmed !== passkeys.find(p => p.id === editingId)?.name) {
+      renamePasskey(editingId, trimmed);
+      reload();
+      toast.success('Passkey renamed');
+    }
+    setEditingId(null);
+    setEditName('');
+  };
+
+  const cancelRename = () => {
+    setEditingId(null);
+    setEditName('');
   };
 
   /* ── Copy credential ID ── */
@@ -193,7 +222,12 @@ export default function PasskeysView() {
                     {isCreating ? (
                       <><div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />Creating…</>
                     ) : (
-                      <><Fingerprint className="h-4 w-4 mr-2" />Platform Authenticator (Touch ID / Face ID)</>
+                      <>
+                        <Fingerprint className="h-4 w-4 mr-2" />Platform Authenticator (Touch ID / Face ID)
+                        {passkeys.filter(pk => pk.type === 'platform').length > 0 && (
+                          <Badge variant="secondary" className="ml-2 text-xs">{passkeys.filter(pk => pk.type === 'platform').length}</Badge>
+                        )}
+                      </>
                     )}
                   </Button>
                   <Button
@@ -203,6 +237,9 @@ export default function PasskeysView() {
                     className="w-full rounded-full btn-press"
                   >
                     <Key className="h-4 w-4 mr-2" />Hardware Security Key (YubiKey etc.)
+                    {passkeys.filter(pk => pk.type === 'cross-platform').length > 0 && (
+                      <Badge variant="secondary" className="ml-2 text-xs">{passkeys.filter(pk => pk.type === 'cross-platform').length}</Badge>
+                    )}
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
@@ -263,7 +300,35 @@ export default function PasskeysView() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
-                              <h4 className="font-semibold text-sm">{pk.name}</h4>
+                              {editingId === pk.id ? (
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    ref={editInputRef}
+                                    type="text"
+                                    value={editName}
+                                    onChange={e => setEditName(e.target.value)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') commitRename();
+                                      if (e.key === 'Escape') cancelRename();
+                                    }}
+                                    onBlur={commitRename}
+                                    className="h-7 px-2 text-sm font-semibold bg-white/5 border border-border/60 rounded-full outline-none focus:ring-1 focus:ring-primary/50 glass-effect"
+                                  />
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full btn-press text-success" onMouseDown={e => { e.preventDefault(); commitRename(); }} title="Save">
+                                    <Check className="h-3 w-3" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full btn-press text-muted-foreground" onMouseDown={e => { e.preventDefault(); cancelRename(); }} title="Cancel">
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <>
+                                  <h4 className="font-semibold text-sm">{pk.name}</h4>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full btn-press" onClick={() => startRename(pk)} title="Rename passkey">
+                                    <Pencil className="h-3 w-3" />
+                                  </Button>
+                                </>
+                              )}
                               <Badge variant="secondary" className="text-xs capitalize">{pk.type}</Badge>
                             </div>
                             <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">

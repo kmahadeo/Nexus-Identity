@@ -181,18 +181,30 @@ const DEFAULT_SETTINGS: AppSettings = {
   vault: { masterPasswordHash: '', saltHex: '', isLocked: true },
 };
 
+/** Get settings key scoped to current user */
+function settingsKey(): string {
+  try {
+    const s = JSON.parse(localStorage.getItem('nexus-session') ?? 'null');
+    return s?.principalId ? `nexus-settings-${s.principalId}` : 'nexus-settings';
+  } catch { return 'nexus-settings'; }
+}
+
 export const settings = {
   get(): AppSettings {
-    const stored = ls<AppSettings>('nexus-settings', DEFAULT_SETTINGS);
+    // Try user-scoped key first, fall back to global (migration)
+    const key = settingsKey();
+    let stored = ls<AppSettings>(key, null as any);
+    if (!stored) stored = ls<AppSettings>('nexus-settings', DEFAULT_SETTINGS);
     // Ensure providers array is always populated (migration for old data)
-    if (!stored.ai.providers || stored.ai.providers.length === 0) {
+    if (!stored.ai?.providers || stored.ai.providers.length === 0) {
+      stored.ai = stored.ai || {} as any;
       stored.ai.providers = DEFAULT_AI_PROVIDERS;
       stored.ai.activeProvider = stored.ai.activeProvider ?? 'anthropic';
     }
     return stored;
   },
   set(s: AppSettings): void {
-    lsSet('nexus-settings', s);
+    lsSet(settingsKey(), s);
   },
   patch(partial: Partial<AppSettings>): void {
     settings.set({ ...settings.get(), ...partial });
@@ -395,19 +407,30 @@ export interface NotificationItem {
   createdAt: number;
 }
 
+/** Get the notification key scoped to the current user */
+function notifKey(): string {
+  try {
+    const s = JSON.parse(localStorage.getItem('nexus-session') ?? 'null');
+    return s?.principalId ? `nexus-notifications-${s.principalId}` : 'nexus-notifications';
+  } catch { return 'nexus-notifications'; }
+}
+
 export const notificationStorage = {
   getAll(): NotificationItem[] {
-    return ls<NotificationItem[]>('nexus-notifications', []);
+    return ls<NotificationItem[]>(notifKey(), []);
   },
   add(n: Omit<NotificationItem, 'id' | 'read' | 'createdAt'>): void {
-    const all = notificationStorage.getAll();
+    const key = notifKey();
+    const all = ls<NotificationItem[]>(key, []);
     all.unshift({ ...n, id: crypto.randomUUID(), read: false, createdAt: Date.now() });
-    lsSet('nexus-notifications', all.slice(0, 100));
+    lsSet(key, all.slice(0, 100));
   },
   markRead(id: string): void {
-    lsSet('nexus-notifications', notificationStorage.getAll().map(n => n.id === id ? { ...n, read: true } : n));
+    const key = notifKey();
+    lsSet(key, ls<NotificationItem[]>(key, []).map(n => n.id === id ? { ...n, read: true } : n));
   },
   markAllRead(): void {
-    lsSet('nexus-notifications', notificationStorage.getAll().map(n => ({ ...n, read: true })));
+    const key = notifKey();
+    lsSet(key, ls<NotificationItem[]>(key, []).map(n => ({ ...n, read: true })));
   },
 };

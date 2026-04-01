@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -6,34 +6,209 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Code, Key, Webhook, Book, Terminal, Copy, CheckCircle2, Globe, Zap, Shield, Activity } from 'lucide-react';
+import { Code, Key, Webhook, Book, Terminal, Copy, CheckCircle2, Globe, Zap, Shield, Activity, Trash2, Plus, Send, Loader2, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
+/* ── Types ──────────────────────────────────────────────────────────────── */
+
+interface ApiKeyEntry {
+  id: string;
+  name: string;
+  key: string;
+  createdAt: number;
+  lastUsed: number | null;
+  isRevealed: boolean;
+}
+
+interface WebhookEntry {
+  id: string;
+  url: string;
+  createdAt: number;
+  lastTriggered: number | null;
+  events: string[];
+}
+
+/* ── localStorage helpers ───────────────────────────────────────────────── */
+
+const API_KEYS_STORAGE_KEY = 'nexus-api-keys';
+const WEBHOOKS_STORAGE_KEY = 'nexus-webhooks';
+
+function generateRandomKey(): string {
+  const arr = new Uint8Array(24);
+  crypto.getRandomValues(arr);
+  const chars = Array.from(arr).map(b => b.toString(36).padStart(2, '0')).join('').substring(0, 32);
+  return `nxs_live_${chars}`;
+}
+
+function loadApiKeys(): ApiKeyEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem(API_KEYS_STORAGE_KEY) ?? '[]');
+  } catch { return []; }
+}
+
+function saveApiKeys(keys: ApiKeyEntry[]) {
+  localStorage.setItem(API_KEYS_STORAGE_KEY, JSON.stringify(keys));
+}
+
+function loadWebhooks(): WebhookEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem(WEBHOOKS_STORAGE_KEY) ?? '[]');
+  } catch { return []; }
+}
+
+function saveWebhooks(hooks: WebhookEntry[]) {
+  localStorage.setItem(WEBHOOKS_STORAGE_KEY, JSON.stringify(hooks));
+}
+
+/* ── Component ──────────────────────────────────────────────────────────── */
+
 export default function DeveloperPortal() {
-  const [apiKey, setApiKey] = useState('nxs_live_1234567890abcdef');
+  const [apiKeys, setApiKeys] = useState<ApiKeyEntry[]>([]);
+  const [webhooks, setWebhooks] = useState<WebhookEntry[]>([]);
   const [webhookUrl, setWebhookUrl] = useState('');
-  const [copied, setCopied] = useState(false);
+  const [newKeyName, setNewKeyName] = useState('');
+  const [copied, setCopied] = useState<string | null>(null);
+  const [testingWebhook, setTestingWebhook] = useState<string | null>(null);
 
-  const handleCopyApiKey = () => {
-    navigator.clipboard.writeText(apiKey);
-    setCopied(true);
+  // Load persisted data
+  useEffect(() => {
+    const keys = loadApiKeys();
+    // Seed a default key if none exist
+    if (keys.length === 0) {
+      const defaultKey: ApiKeyEntry = {
+        id: crypto.randomUUID(),
+        name: 'Default Key',
+        key: generateRandomKey(),
+        createdAt: Date.now(),
+        lastUsed: null,
+        isRevealed: false,
+      };
+      saveApiKeys([defaultKey]);
+      setApiKeys([defaultKey]);
+    } else {
+      setApiKeys(keys);
+    }
+    setWebhooks(loadWebhooks());
+  }, []);
+
+  // Active/primary key for display in quickstart
+  const primaryKey = apiKeys.length > 0 ? apiKeys[0] : null;
+
+  /* ── API Key management ─────────────────────────────────────────────── */
+
+  const handleCreateApiKey = () => {
+    const name = newKeyName.trim() || `API Key ${apiKeys.length + 1}`;
+    const entry: ApiKeyEntry = {
+      id: crypto.randomUUID(),
+      name,
+      key: generateRandomKey(),
+      createdAt: Date.now(),
+      lastUsed: null,
+      isRevealed: false,
+    };
+    const updated = [...apiKeys, entry];
+    saveApiKeys(updated);
+    setApiKeys(updated);
+    setNewKeyName('');
+    toast.success(`API key "${name}" created`);
+  };
+
+  const handleRevokeApiKey = (id: string) => {
+    const key = apiKeys.find(k => k.id === id);
+    const updated = apiKeys.filter(k => k.id !== id);
+    saveApiKeys(updated);
+    setApiKeys(updated);
+    toast.success(`API key "${key?.name}" revoked`);
+  };
+
+  const handleCopyApiKey = (key: string, id: string) => {
+    navigator.clipboard.writeText(key);
+    setCopied(id);
+    // Mark as used
+    const updated = apiKeys.map(k => k.id === id ? { ...k, lastUsed: Date.now() } : k);
+    saveApiKeys(updated);
+    setApiKeys(updated);
     toast.success('API key copied to clipboard');
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setCopied(null), 2000);
   };
 
-  const handleGenerateApiKey = () => {
-    const newKey = `nxs_live_${Math.random().toString(36).substring(2, 15)}${Math.random().toString(36).substring(2, 15)}`;
-    setApiKey(newKey);
-    toast.success('New API key generated');
+  const toggleRevealKey = (id: string) => {
+    const updated = apiKeys.map(k => k.id === id ? { ...k, isRevealed: !k.isRevealed } : k);
+    setApiKeys(updated);
   };
+
+  /* ── Webhook management ─────────────────────────────────────────────── */
 
   const handleSaveWebhook = () => {
     if (!webhookUrl.trim()) {
       toast.error('Please enter a webhook URL');
       return;
     }
+    try {
+      new URL(webhookUrl.trim());
+    } catch {
+      toast.error('Please enter a valid URL');
+      return;
+    }
+
+    const entry: WebhookEntry = {
+      id: crypto.randomUUID(),
+      url: webhookUrl.trim(),
+      createdAt: Date.now(),
+      lastTriggered: null,
+      events: ['vault.entry.created', 'vault.entry.updated', 'security.threat.detected'],
+    };
+    const updated = [...webhooks, entry];
+    saveWebhooks(updated);
+    setWebhooks(updated);
+    setWebhookUrl('');
     toast.success('Webhook endpoint saved');
   };
+
+  const handleDeleteWebhook = (id: string) => {
+    const updated = webhooks.filter(w => w.id !== id);
+    saveWebhooks(updated);
+    setWebhooks(updated);
+    toast.success('Webhook removed');
+  };
+
+  const handleTestWebhook = async (hook: WebhookEntry) => {
+    setTestingWebhook(hook.id);
+    toast.info(`Sending test event to ${hook.url}...`);
+
+    // Simulate network call
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // Update last triggered
+    const updated = webhooks.map(w =>
+      w.id === hook.id ? { ...w, lastTriggered: Date.now() } : w
+    );
+    saveWebhooks(updated);
+    setWebhooks(updated);
+    setTestingWebhook(null);
+
+    // Mock response
+    toast.success(
+      `Test event delivered to ${new URL(hook.url).hostname}. Response: 200 OK`,
+      { description: 'Payload: { "event": "test.ping", "timestamp": ' + Date.now() + ' }' }
+    );
+  };
+
+  /* ── Formatting helpers ─────────────────────────────────────────────── */
+
+  const formatDate = (ts: number) => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const formatTime = (ts: number | null) => {
+    if (!ts) return 'Never';
+    const diff = Date.now() - ts;
+    if (diff < 60000) return 'Just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return formatDate(ts);
+  };
+
+  const maskKey = (key: string) => key.substring(0, 12) + '\u2022'.repeat(20);
+
+  const displayKey = primaryKey?.key ?? 'nxs_live_...';
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -49,26 +224,15 @@ export default function DeveloperPortal() {
       </div>
 
       {/* Quick Stats */}
-      <div className="grid md:grid-cols-4 gap-4">
-        <Card className="border-border/40 glass-strong shadow-depth-md card-tactile gradient-primary">
+      <div className="grid md:grid-cols-3 gap-4">
+        <Card className="border-border/40 glass-strong shadow-depth-md card-tactile gradient-warning">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-3">
-              <Activity className="h-7 w-7 text-primary" />
-              <Badge variant="secondary" className="text-xs">Live</Badge>
+              <Key className="h-7 w-7 text-warning" />
+              <Badge variant="secondary" className="text-xs">{apiKeys.length}</Badge>
             </div>
-            <div className="text-3xl font-bold mb-1">1,247</div>
-            <div className="text-sm text-muted-foreground">API Calls Today</div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/40 glass-strong shadow-depth-md card-tactile gradient-success">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-3">
-              <CheckCircle2 className="h-7 w-7 text-success" />
-              <Badge variant="secondary" className="text-xs">99.9%</Badge>
-            </div>
-            <div className="text-3xl font-bold mb-1">Uptime</div>
-            <div className="text-sm text-muted-foreground">Last 30 Days</div>
+            <div className="text-3xl font-bold mb-1">{apiKeys.length}</div>
+            <div className="text-sm text-muted-foreground">API Keys</div>
           </CardContent>
         </Card>
 
@@ -76,21 +240,21 @@ export default function DeveloperPortal() {
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-3">
               <Webhook className="h-7 w-7 text-accent" />
-              <Badge variant="secondary" className="text-xs">Active</Badge>
+              <Badge variant="secondary" className="text-xs">{webhooks.length > 0 ? 'Active' : 'None'}</Badge>
             </div>
-            <div className="text-3xl font-bold mb-1">3</div>
+            <div className="text-3xl font-bold mb-1">{webhooks.length}</div>
             <div className="text-sm text-muted-foreground">Webhooks</div>
           </CardContent>
         </Card>
 
-        <Card className="border-border/40 glass-strong shadow-depth-md card-tactile gradient-warning">
+        <Card className="border-border/40 glass-strong shadow-depth-md card-tactile gradient-primary">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-3">
-              <Globe className="h-7 w-7 text-warning" />
-              <Badge variant="secondary" className="text-xs">Global</Badge>
+              <Activity className="h-7 w-7 text-primary" />
+              <Badge variant="secondary" className="text-xs">Local</Badge>
             </div>
-            <div className="text-3xl font-bold mb-1">12ms</div>
-            <div className="text-sm text-muted-foreground">Avg Latency</div>
+            <div className="text-3xl font-bold mb-1">{apiKeys.length + webhooks.length}</div>
+            <div className="text-sm text-muted-foreground">Total Integrations</div>
           </CardContent>
         </Card>
       </div>
@@ -98,13 +262,14 @@ export default function DeveloperPortal() {
       <Tabs defaultValue="quickstart" className="space-y-6">
         <TabsList className="glass-effect border border-border/40">
           <TabsTrigger value="quickstart">Quick Start</TabsTrigger>
+          <TabsTrigger value="keys">API Keys</TabsTrigger>
           <TabsTrigger value="api">API Reference</TabsTrigger>
           <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
           <TabsTrigger value="sdk">SDK Libraries</TabsTrigger>
         </TabsList>
 
         <TabsContent value="quickstart" className="space-y-6">
-          {/* API Key Management */}
+          {/* API Key Preview */}
           <Card className="border-border/40 glass-strong shadow-depth-md">
             <CardHeader>
               <CardTitle>API Authentication</CardTitle>
@@ -112,30 +277,34 @@ export default function DeveloperPortal() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="apiKey">Your API Key</Label>
+                <Label htmlFor="apiKeyPreview">Your Primary API Key</Label>
                 <div className="flex gap-2">
                   <Input
-                    id="apiKey"
-                    value={apiKey}
+                    id="apiKeyPreview"
+                    value={primaryKey?.isRevealed ? displayKey : maskKey(displayKey)}
                     readOnly
                     className="glass-effect font-mono text-sm"
                   />
-                  <Button
-                    onClick={handleCopyApiKey}
-                    variant="outline"
-                    size="icon"
-                    className="rounded-full btn-press"
-                  >
-                    {copied ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
-                  </Button>
-                  <Button
-                    onClick={handleGenerateApiKey}
-                    variant="outline"
-                    className="rounded-full btn-press"
-                  >
-                    <Key className="h-4 w-4 mr-2" />
-                    Regenerate
-                  </Button>
+                  {primaryKey && (
+                    <>
+                      <Button
+                        onClick={() => toggleRevealKey(primaryKey.id)}
+                        variant="outline"
+                        size="icon"
+                        className="rounded-full btn-press"
+                      >
+                        {primaryKey.isRevealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                      <Button
+                        onClick={() => handleCopyApiKey(primaryKey.key, primaryKey.id)}
+                        variant="outline"
+                        size="icon"
+                        className="rounded-full btn-press"
+                      >
+                        {copied === primaryKey.id ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
+                      </Button>
+                    </>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground">Keep your API key secure. Never share it publicly or commit it to version control.</p>
               </div>
@@ -147,7 +316,7 @@ export default function DeveloperPortal() {
                 </h4>
                 <pre className="text-xs bg-background/50 p-3 rounded-lg overflow-x-auto">
 {`curl -X GET https://api.nexus.ai/v2/vault/entries \\
-  -H "Authorization: Bearer ${apiKey}" \\
+  -H "Authorization: Bearer ${primaryKey?.isRevealed ? displayKey : 'nxs_live_...'}" \\
   -H "Content-Type: application/json"`}
                 </pre>
               </div>
@@ -173,7 +342,7 @@ export default function DeveloperPortal() {
                   code={`import { NexusClient } from '@nexus/sdk';
 
 const nexus = new NexusClient({
-  apiKey: '${apiKey}',
+  apiKey: '${primaryKey?.isRevealed ? displayKey : 'nxs_live_...'}',
   environment: 'production'
 });`}
                 />
@@ -188,6 +357,96 @@ console.log(vaultEntries);`}
           </Card>
         </TabsContent>
 
+        {/* ── API Keys Management Tab ───────────────────────────────────── */}
+        <TabsContent value="keys" className="space-y-6">
+          <Card className="border-border/40 glass-strong shadow-depth-md">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>API Key Management</CardTitle>
+                  <CardDescription>Create, manage, and revoke API keys for your integrations</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Create new key */}
+              <div className="p-4 rounded-xl glass-effect border border-border/40 shadow-depth-sm space-y-3">
+                <h4 className="font-semibold text-sm flex items-center gap-2">
+                  <Plus className="h-4 w-4" />
+                  Create New API Key
+                </h4>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Key name (e.g. Production, Staging)"
+                    value={newKeyName}
+                    onChange={(e) => setNewKeyName(e.target.value)}
+                    className="glass-effect"
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateApiKey()}
+                  />
+                  <Button onClick={handleCreateApiKey} className="rounded-full btn-press">
+                    <Key className="h-4 w-4 mr-2" />
+                    Generate
+                  </Button>
+                </div>
+              </div>
+
+              {/* Keys list */}
+              <div className="space-y-3">
+                {apiKeys.map(keyEntry => (
+                  <div key={keyEntry.id} className="p-4 rounded-xl glass-effect border border-border/40 shadow-depth-sm card-tactile">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Key className="h-4 w-4 text-primary" />
+                        <span className="font-semibold text-sm">{keyEntry.name}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 rounded-full"
+                          onClick={() => toggleRevealKey(keyEntry.id)}
+                        >
+                          {keyEntry.isRevealed ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 rounded-full"
+                          onClick={() => handleCopyApiKey(keyEntry.key, keyEntry.id)}
+                        >
+                          {copied === keyEntry.id ? <CheckCircle2 className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 rounded-full text-destructive hover:text-destructive"
+                          onClick={() => handleRevokeApiKey(keyEntry.id)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="font-mono text-xs bg-background/50 p-2 rounded-lg mb-2 break-all">
+                      {keyEntry.isRevealed ? keyEntry.key : maskKey(keyEntry.key)}
+                    </div>
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                      <span>Created: {formatDate(keyEntry.createdAt)}</span>
+                      <span>Last used: {formatTime(keyEntry.lastUsed)}</span>
+                    </div>
+                  </div>
+                ))}
+
+                {apiKeys.length === 0 && (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No API keys yet. Create one above to get started.</p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="api" className="space-y-6">
           <Card className="border-border/40 glass-strong shadow-depth-md">
             <CardHeader>
@@ -197,60 +456,21 @@ console.log(vaultEntries);`}
             <CardContent>
               <ScrollArea className="h-[500px]">
                 <div className="space-y-4">
-                  <EndpointCard
-                    method="GET"
-                    endpoint="/v2/vault/entries"
-                    description="List all vault entries"
-                    response="Array<VaultEntry>"
-                  />
-                  <EndpointCard
-                    method="POST"
-                    endpoint="/v2/vault/entries"
-                    description="Create a new vault entry"
-                    response="VaultEntry"
-                  />
-                  <EndpointCard
-                    method="GET"
-                    endpoint="/v2/auth/passkeys"
-                    description="List registered passkeys"
-                    response="Array<Passkey>"
-                  />
-                  <EndpointCard
-                    method="POST"
-                    endpoint="/v2/auth/passkeys/register"
-                    description="Register a new passkey"
-                    response="PasskeyRegistration"
-                  />
-                  <EndpointCard
-                    method="GET"
-                    endpoint="/v2/ai/recommendations"
-                    description="Get AI security recommendations"
-                    response="Array<Recommendation>"
-                  />
-                  <EndpointCard
-                    method="GET"
-                    endpoint="/v2/teams"
-                    description="List user teams"
-                    response="Array<Team>"
-                  />
-                  <EndpointCard
-                    method="POST"
-                    endpoint="/v2/teams/:id/members"
-                    description="Add team member"
-                    response="TeamMember"
-                  />
-                  <EndpointCard
-                    method="GET"
-                    endpoint="/v2/integrations"
-                    description="List SSO integrations"
-                    response="Array<Integration>"
-                  />
+                  <EndpointCard method="GET" endpoint="/v2/vault/entries" description="List all vault entries" response="Array<VaultEntry>" />
+                  <EndpointCard method="POST" endpoint="/v2/vault/entries" description="Create a new vault entry" response="VaultEntry" />
+                  <EndpointCard method="GET" endpoint="/v2/auth/passkeys" description="List registered passkeys" response="Array<Passkey>" />
+                  <EndpointCard method="POST" endpoint="/v2/auth/passkeys/register" description="Register a new passkey" response="PasskeyRegistration" />
+                  <EndpointCard method="GET" endpoint="/v2/ai/recommendations" description="Get AI security recommendations" response="Array<Recommendation>" />
+                  <EndpointCard method="GET" endpoint="/v2/teams" description="List user teams" response="Array<Team>" />
+                  <EndpointCard method="POST" endpoint="/v2/teams/:id/members" description="Add team member" response="TeamMember" />
+                  <EndpointCard method="GET" endpoint="/v2/integrations" description="List SSO integrations" response="Array<Integration>" />
                 </div>
               </ScrollArea>
             </CardContent>
           </Card>
         </TabsContent>
 
+        {/* ── Webhooks Tab ──────────────────────────────────────────────── */}
         <TabsContent value="webhooks" className="space-y-6">
           <Card className="border-border/40 glass-strong shadow-depth-md">
             <CardHeader>
@@ -258,8 +478,9 @@ console.log(vaultEntries);`}
               <CardDescription>Receive real-time security events and notifications</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Add new webhook */}
               <div className="space-y-2">
-                <Label htmlFor="webhookUrl">Webhook Endpoint URL</Label>
+                <Label htmlFor="webhookUrl">Add Webhook Endpoint</Label>
                 <div className="flex gap-2">
                   <Input
                     id="webhookUrl"
@@ -267,6 +488,7 @@ console.log(vaultEntries);`}
                     value={webhookUrl}
                     onChange={(e) => setWebhookUrl(e.target.value)}
                     className="glass-effect"
+                    onKeyDown={(e) => e.key === 'Enter' && handleSaveWebhook()}
                   />
                   <Button
                     onClick={handleSaveWebhook}
@@ -278,31 +500,70 @@ console.log(vaultEntries);`}
                 </div>
               </div>
 
-              <div className="grid md:grid-cols-2 gap-4">
-                <EventCard
-                  event="vault.entry.created"
-                  description="Triggered when a new vault entry is created"
-                />
-                <EventCard
-                  event="vault.entry.updated"
-                  description="Triggered when a vault entry is modified"
-                />
-                <EventCard
-                  event="auth.passkey.registered"
-                  description="Triggered when a new passkey is registered"
-                />
-                <EventCard
-                  event="security.threat.detected"
-                  description="Triggered when a security threat is identified"
-                />
-                <EventCard
-                  event="team.member.added"
-                  description="Triggered when a team member is added"
-                />
-                <EventCard
-                  event="ai.recommendation.generated"
-                  description="Triggered when AI generates a new recommendation"
-                />
+              {/* Saved webhooks */}
+              {webhooks.length > 0 && (
+                <div className="space-y-3">
+                  <h4 className="font-semibold text-sm">Saved Webhooks</h4>
+                  {webhooks.map(hook => (
+                    <div key={hook.id} className="p-4 rounded-xl glass-effect border border-border/40 shadow-depth-sm card-tactile">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <Webhook className="h-4 w-4 text-primary flex-shrink-0" />
+                          <span className="font-mono text-sm truncate">{hook.url}</span>
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-full btn-press"
+                            onClick={() => handleTestWebhook(hook)}
+                            disabled={testingWebhook === hook.id}
+                          >
+                            {testingWebhook === hook.id ? (
+                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                            ) : (
+                              <Send className="h-3 w-3 mr-1" />
+                            )}
+                            Test
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 rounded-full text-destructive hover:text-destructive"
+                            onClick={() => handleDeleteWebhook(hook.id)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                        <span>Created: {formatDate(hook.createdAt)}</span>
+                        <span>Last triggered: {formatTime(hook.lastTriggered)}</span>
+                        <span>{hook.events.length} events</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {webhooks.length === 0 && (
+                <div className="text-center py-6 text-muted-foreground">
+                  <Webhook className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No webhooks configured. Add one above to receive events.</p>
+                </div>
+              )}
+
+              {/* Events reference */}
+              <div className="pt-2">
+                <h4 className="font-semibold text-sm mb-3">Available Events</h4>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <EventCard event="vault.entry.created" description="Triggered when a new vault entry is created" />
+                  <EventCard event="vault.entry.updated" description="Triggered when a vault entry is modified" />
+                  <EventCard event="auth.passkey.registered" description="Triggered when a new passkey is registered" />
+                  <EventCard event="security.threat.detected" description="Triggered when a security threat is identified" />
+                  <EventCard event="team.member.added" description="Triggered when a team member is added" />
+                  <EventCard event="ai.recommendation.generated" description="Triggered when AI generates a new recommendation" />
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -316,30 +577,10 @@ console.log(vaultEntries);`}
             </CardHeader>
             <CardContent>
               <div className="grid md:grid-cols-2 gap-4">
-                <SDKCard
-                  language="TypeScript"
-                  package="@nexus/sdk"
-                  version="2.0.0"
-                  install="npm install @nexus/sdk"
-                />
-                <SDKCard
-                  language="Python"
-                  package="nexus-sdk"
-                  version="2.0.0"
-                  install="pip install nexus-sdk"
-                />
-                <SDKCard
-                  language="Go"
-                  package="github.com/nexus/sdk-go"
-                  version="2.0.0"
-                  install="go get github.com/nexus/sdk-go"
-                />
-                <SDKCard
-                  language="Ruby"
-                  package="nexus-sdk"
-                  version="2.0.0"
-                  install="gem install nexus-sdk"
-                />
+                <SDKCard language="TypeScript" package="@nexus/sdk" version="2.0.0" install="npm install @nexus/sdk" />
+                <SDKCard language="Python" package="nexus-sdk" version="2.0.0" install="pip install nexus-sdk" />
+                <SDKCard language="Go" package="github.com/nexus/sdk-go" version="2.0.0" install="go get github.com/nexus/sdk-go" />
+                <SDKCard language="Ruby" package="nexus-sdk" version="2.0.0" install="gem install nexus-sdk" />
               </div>
             </CardContent>
           </Card>
@@ -365,6 +606,8 @@ console.log(vaultEntries);`}
     </div>
   );
 }
+
+/* ── Sub-components ─────────────────────────────────────────────────────── */
 
 function StepCard({ number, title, code }: { number: number; title: string; code: string }) {
   return (

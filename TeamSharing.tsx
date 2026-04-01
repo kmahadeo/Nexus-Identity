@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useGetTeams, useCreateTeam, useAddTeamMember, useGetSharedVaultEntries, useShareVaultEntry, useGetVaultEntries } from './hooks/useQueries';
+import { useGetTeams, useCreateTeam, useAddTeamMember, useRenameTeam, useRemoveTeamMember, useDeleteTeam, useGetSharedVaultEntries, useShareVaultEntry, useGetVaultEntries } from './hooks/useQueries';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Users, UserPlus, Shield, Clock, Eye, Edit, Crown, Share2, Lock } from 'lucide-react';
+import { Users, UserPlus, Shield, Clock, Eye, Edit, Crown, Share2, Lock, AlertTriangle, Mail, CheckCircle2, Pencil, X, Trash2, Check, UserCog } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TeamMember } from './backend';
 import { roleRegistry } from './lib/storage';
@@ -20,6 +20,9 @@ export default function TeamSharing() {
   const { data: vaultEntries } = useGetVaultEntries();
   const { mutate: createTeam, isPending: isCreating } = useCreateTeam();
   const { mutate: addMember, isPending: isAddingMember } = useAddTeamMember();
+  const { mutate: renameTeam } = useRenameTeam();
+  const { mutate: removeTeamMember } = useRemoveTeamMember();
+  const { mutate: deleteTeam } = useDeleteTeam();
   const { mutate: shareEntry, isPending: isSharing } = useShareVaultEntry();
 
   const [isTeamDialogOpen, setIsTeamDialogOpen] = useState(false);
@@ -32,6 +35,8 @@ export default function TeamSharing() {
   const [memberRole, setMemberRole] = useState<'view' | 'edit' | 'owner'>('view');
   const [selectedEntry, setSelectedEntry] = useState('');
   const [sharePermission, setSharePermission] = useState<'view' | 'edit'>('view');
+  const [deleteTargetTeam, setDeleteTargetTeam] = useState<string | null>(null);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
   const totalMembers = teams?.reduce((acc, team) => acc + team.members.length, 0) || 0;
   const totalShared = sharedEntries?.length || 0;
@@ -78,13 +83,80 @@ export default function TeamSharing() {
 
     addMember({ teamId: selectedTeam, member }, {
       onSuccess: () => {
-        toast.success(`${displayName} added${existing ? '' : ' (pending — they must register to accept)'}`);
+        const team = teams?.find(t => t.id === selectedTeam);
+        // Log audit event
+        logTeamAudit({
+          action: `Invited ${displayName} to "${team?.name ?? 'team'}" as ${memberRole}`,
+          actor: 'You',
+          target: team?.name ?? selectedTeam,
+          type: 'invite',
+        });
+        // Create pending invite if not registered
+        if (!existing && team) {
+          addPendingInvite({ email, teamId: selectedTeam, teamName: team.name, role: memberRole });
+        }
+        toast.success(`${displayName} added${existing ? '' : ' (pending — invitation sent)'}`);
         setMemberPrincipal('');
         setIsMemberDialogOpen(false);
       },
       onError: () => {
         toast.error('Failed to add member');
       },
+    });
+  };
+
+  const handleRenameTeam = (teamId: string, newName: string) => {
+    if (!newName.trim()) {
+      toast.error('Team name cannot be empty');
+      return;
+    }
+    const team = teams?.find(t => t.id === teamId);
+    renameTeam({ teamId, newName: newName.trim() }, {
+      onSuccess: () => {
+        logTeamAudit({
+          action: `Renamed team "${team?.name ?? 'Unknown'}" to "${newName.trim()}"`,
+          actor: 'You',
+          target: newName.trim(),
+          type: 'role_change',
+        });
+        toast.success('Team renamed successfully');
+      },
+      onError: () => toast.error('Failed to rename team'),
+    });
+  };
+
+  const handleRemoveMember = (teamId: string, member: TeamMember) => {
+    const team = teams?.find(t => t.id === teamId);
+    removeTeamMember({ teamId, principalId: member.principalId }, {
+      onSuccess: () => {
+        logTeamAudit({
+          action: `Removed ${member.name || member.email || 'member'} from "${team?.name ?? 'team'}"`,
+          actor: 'You',
+          target: team?.name ?? teamId,
+          type: 'remove',
+        });
+        toast.success(`${member.name || member.email || 'Member'} removed from team`);
+      },
+      onError: () => toast.error('Failed to remove member'),
+    });
+  };
+
+  const handleDeleteTeam = () => {
+    if (!deleteTargetTeam) return;
+    const team = teams?.find(t => t.id === deleteTargetTeam);
+    deleteTeam(deleteTargetTeam, {
+      onSuccess: () => {
+        logTeamAudit({
+          action: `Deleted team "${team?.name ?? 'Unknown'}"`,
+          actor: 'You',
+          target: team?.name ?? deleteTargetTeam,
+          type: 'remove',
+        });
+        toast.success('Team deleted');
+        setIsDeleteConfirmOpen(false);
+        setDeleteTargetTeam(null);
+      },
+      onError: () => toast.error('Failed to delete team'),
     });
   };
 
@@ -107,6 +179,12 @@ export default function TeamSharing() {
 
     shareEntry({ entry, sharedWith, permissions }, {
       onSuccess: () => {
+        logTeamAudit({
+          action: `Shared "${entry.name}" with team "${team.name}" (${sharePermission})`,
+          actor: 'You',
+          target: entry.name,
+          type: 'share',
+        });
         toast.success('Entry shared successfully');
         setIsShareDialogOpen(false);
       },
@@ -164,6 +242,7 @@ export default function TeamSharing() {
         <TabsList className="glass-effect border border-border/40">
           <TabsTrigger value="teams">Teams</TabsTrigger>
           <TabsTrigger value="shared">Shared Items</TabsTrigger>
+          <TabsTrigger value="members">Members</TabsTrigger>
           <TabsTrigger value="audit">Audit Trail</TabsTrigger>
         </TabsList>
 
@@ -227,12 +306,18 @@ export default function TeamSharing() {
                 <ScrollArea className="h-[400px]">
                   <div className="space-y-3">
                     {teams.map((team) => (
-                      <TeamCard 
-                        key={team.id} 
-                        team={team} 
+                      <TeamCard
+                        key={team.id}
+                        team={team}
                         onAddMember={() => {
                           setSelectedTeam(team.id);
                           setIsMemberDialogOpen(true);
+                        }}
+                        onRename={(newName: string) => handleRenameTeam(team.id, newName)}
+                        onRemoveMember={(member: TeamMember) => handleRemoveMember(team.id, member)}
+                        onDeleteTeam={() => {
+                          setDeleteTargetTeam(team.id);
+                          setIsDeleteConfirmOpen(true);
                         }}
                       />
                     ))}
@@ -346,6 +431,26 @@ export default function TeamSharing() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="members" className="space-y-4">
+          <Card className="border-border/40 glass-strong shadow-depth-md">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>All Members</CardTitle>
+                  <CardDescription>Overview of all members across all teams</CardDescription>
+                </div>
+                <Badge variant="secondary" className="text-xs">
+                  <UserCog className="h-3 w-3 mr-1" />
+                  {totalMembers} total
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <AllMembersTable teams={teams ?? []} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="audit" className="space-y-4">
           <Card className="border-border/40 glass-strong shadow-depth-md">
             <CardHeader>
@@ -353,11 +458,7 @@ export default function TeamSharing() {
               <CardDescription>Track who accessed what and when</CardDescription>
             </CardHeader>
             <CardContent>
-              <EmptyState
-                icon={Clock}
-                title="No audit logs yet"
-                description="Access history will appear here once team members interact with shared items"
-              />
+              <AuditTrail teams={teams ?? []} sharedEntries={sharedEntries ?? []} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -402,11 +503,39 @@ export default function TeamSharing() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Team Confirmation Dialog */}
+      <Dialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
+        <DialogContent className="glass-strong border-border/40">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Delete Team
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete "{teams?.find(t => t.id === deleteTargetTeam)?.name}"? This will remove all members and cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={() => setIsDeleteConfirmOpen(false)} className="rounded-full">
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteTeam} className="rounded-full btn-press">
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Team
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function TeamCard({ team, onAddMember }: any) {
+function TeamCard({ team, onAddMember, onRename, onRemoveMember, onDeleteTeam }: any) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(team.name);
+  const [showAllMembers, setShowAllMembers] = useState(false);
+
   const getRoleIcon = (role: string) => {
     switch (role) {
       case 'owner': return <Crown className="h-3.5 w-3.5 text-warning" />;
@@ -415,6 +544,20 @@ function TeamCard({ team, onAddMember }: any) {
     }
   };
 
+  const handleSaveRename = () => {
+    if (editName.trim() && editName.trim() !== team.name) {
+      onRename(editName.trim());
+    }
+    setIsEditing(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') handleSaveRename();
+    if (e.key === 'Escape') { setEditName(team.name); setIsEditing(false); }
+  };
+
+  const visibleMembers = showAllMembers ? team.members : team.members.slice(0, 3);
+
   return (
     <div className="p-4 rounded-xl border border-border/40 glass-effect shadow-depth-sm card-tactile animate-slide-in">
       <div className="flex items-start justify-between mb-4">
@@ -422,16 +565,44 @@ function TeamCard({ team, onAddMember }: any) {
           <div className="p-2.5 rounded-xl bg-primary/10 shadow-depth-sm">
             <Users className="h-5 w-5 text-primary" />
           </div>
-          <div>
-            <h4 className="font-semibold mb-1">{team.name}</h4>
+          <div className="flex-1 min-w-0">
+            {isEditing ? (
+              <div className="flex items-center gap-1.5">
+                <Input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  autoFocus
+                  className="h-7 text-sm font-semibold px-2 py-1"
+                />
+                <Button size="icon" variant="ghost" onClick={handleSaveRename} className="h-7 w-7 rounded-full btn-press shrink-0">
+                  <Check className="h-3.5 w-3.5 text-success" />
+                </Button>
+                <Button size="icon" variant="ghost" onClick={() => { setEditName(team.name); setIsEditing(false); }} className="h-7 w-7 rounded-full btn-press shrink-0">
+                  <X className="h-3.5 w-3.5 text-muted-foreground" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <h4 className="font-semibold mb-1">{team.name}</h4>
+                <Button size="icon" variant="ghost" onClick={() => setIsEditing(true)} className="h-6 w-6 rounded-full btn-press opacity-60 hover:opacity-100">
+                  <Pencil className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
             <p className="text-xs text-muted-foreground">
               Created {new Date(Number(team.createdAt) / 1000000).toLocaleDateString()}
             </p>
           </div>
         </div>
-        <Button size="sm" variant="ghost" onClick={onAddMember} className="rounded-full btn-press">
-          <UserPlus className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={onAddMember} className="rounded-full btn-press" title="Add member">
+            <UserPlus className="h-4 w-4" />
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onDeleteTeam} className="rounded-full btn-press text-destructive/60 hover:text-destructive" title="Delete team">
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
       <div className="space-y-2">
         <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
@@ -441,19 +612,31 @@ function TeamCard({ team, onAddMember }: any) {
             Encrypted
           </Badge>
         </div>
-        {team.members.slice(0, 3).map((member: TeamMember, idx: number) => (
-          <div key={idx} className="flex items-center gap-2 p-2 rounded-lg bg-background/50">
+        {visibleMembers.map((member: TeamMember, idx: number) => (
+          <div key={idx} className="flex items-center gap-2 p-2 rounded-lg bg-background/50 group">
             <div className="flex items-center gap-2 flex-1 min-w-0">
               {getRoleIcon(member.role)}
               <span className="text-xs truncate">{member.name || member.email || member.principal?.toString().slice(0, 20)}</span>
             </div>
             <Badge variant="outline" className="text-xs">{member.role}</Badge>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => onRemoveMember(member)}
+              className="h-6 w-6 rounded-full btn-press opacity-0 group-hover:opacity-100 transition-opacity text-destructive/60 hover:text-destructive"
+              title="Remove member"
+            >
+              <X className="h-3 w-3" />
+            </Button>
           </div>
         ))}
         {team.members.length > 3 && (
-          <p className="text-xs text-muted-foreground text-center pt-1">
-            +{team.members.length - 3} more
-          </p>
+          <button
+            onClick={() => setShowAllMembers(!showAllMembers)}
+            className="text-xs text-primary hover:text-primary/80 text-center pt-1 w-full cursor-pointer"
+          >
+            {showAllMembers ? 'Show less' : `+${team.members.length - 3} more`}
+          </button>
         )}
       </div>
     </div>
@@ -492,6 +675,205 @@ function SharedItemCard({ sharedEntry }: any) {
         </div>
       </div>
     </div>
+  );
+}
+
+/* ── Audit trail ───────────────────────────────────────────────────────── */
+
+interface AuditEvent {
+  id: string;
+  action: string;
+  actor: string;
+  target: string;
+  timestamp: number;
+  type: 'share' | 'access' | 'invite' | 'role_change' | 'remove';
+}
+
+const AUDIT_KEY = 'nexus-team-audit';
+
+export function logTeamAudit(event: Omit<AuditEvent, 'id' | 'timestamp'>) {
+  try {
+    const all: AuditEvent[] = JSON.parse(localStorage.getItem(AUDIT_KEY) ?? '[]');
+    all.unshift({ ...event, id: crypto.randomUUID(), timestamp: Date.now() });
+    localStorage.setItem(AUDIT_KEY, JSON.stringify(all.slice(0, 200)));
+  } catch {}
+}
+
+function AuditTrail({ teams, sharedEntries }: { teams: any[]; sharedEntries: any[] }) {
+  const events: AuditEvent[] = (() => {
+    try { return JSON.parse(localStorage.getItem(AUDIT_KEY) ?? '[]'); } catch { return []; }
+  })();
+
+  // Seed from existing data if empty
+  const allEvents = events.length > 0 ? events : [
+    ...teams.flatMap(t => t.members.map((m: any, i: number) => ({
+      id: `seed-invite-${t.id}-${i}`,
+      action: `Joined team "${t.name}"`,
+      actor: m.name || m.email || 'Unknown',
+      target: t.name,
+      timestamp: Number(t.createdAt) / 1000000 + i * 60000,
+      type: 'invite' as const,
+    }))),
+    ...sharedEntries.map((s: any, i: number) => ({
+      id: `seed-share-${i}`,
+      action: `Shared "${s.entry.name}" with ${s.sharedWith.length} members`,
+      actor: 'You',
+      target: s.entry.name,
+      timestamp: Number(s.sharedAt) / 1000000,
+      type: 'share' as const,
+    })),
+  ].sort((a, b) => b.timestamp - a.timestamp);
+
+  const typeIcon: Record<string, any> = {
+    share: Share2, access: Eye, invite: UserPlus, role_change: Edit, remove: AlertTriangle,
+  };
+  const typeColor: Record<string, string> = {
+    share: 'text-primary', access: 'text-emerald-400', invite: 'text-cyan-400',
+    role_change: 'text-amber-400', remove: 'text-red-400',
+  };
+
+  if (allEvents.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <div className="p-6 rounded-2xl bg-muted/20 mb-4"><Clock className="h-12 w-12 text-muted-foreground" /></div>
+        <h3 className="text-lg font-semibold mb-2">No audit logs yet</h3>
+        <p className="text-sm text-muted-foreground max-w-md">Access history will appear here as team members interact with shared items</p>
+      </div>
+    );
+  }
+
+  return (
+    <ScrollArea className="h-[400px]">
+      <div className="space-y-1.5">
+        {allEvents.slice(0, 50).map((event) => {
+          const Icon = typeIcon[event.type] ?? Clock;
+          const color = typeColor[event.type] ?? 'text-muted-foreground';
+          return (
+            <div key={event.id} className="flex items-start gap-3 p-3 rounded-lg glass-effect border border-border/40">
+              <div className={`p-1.5 rounded-md bg-white/5 mt-0.5 ${color}`}>
+                <Icon className="h-3.5 w-3.5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-white/70">{event.action}</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-xs text-white/35">{event.actor}</span>
+                  <span className="text-xs text-white/15">·</span>
+                  <span className="text-xs text-white/25">{new Date(event.timestamp).toLocaleString()}</span>
+                </div>
+              </div>
+              <Badge variant="secondary" className="text-[10px] capitalize shrink-0">{event.type.replace('_', ' ')}</Badge>
+            </div>
+          );
+        })}
+      </div>
+    </ScrollArea>
+  );
+}
+
+/* ── Pending invitations section ──────────────────────────────────────── */
+
+const INVITE_KEY = 'nexus-pending-invites';
+
+interface PendingInvite {
+  id: string;
+  email: string;
+  teamId: string;
+  teamName: string;
+  role: string;
+  invitedAt: number;
+  status: 'pending' | 'accepted' | 'declined';
+}
+
+export function getPendingInvites(): PendingInvite[] {
+  try { return JSON.parse(localStorage.getItem(INVITE_KEY) ?? '[]'); } catch { return []; }
+}
+
+export function addPendingInvite(invite: Omit<PendingInvite, 'id' | 'invitedAt' | 'status'>): PendingInvite {
+  const full: PendingInvite = {
+    ...invite,
+    id: crypto.randomUUID(),
+    invitedAt: Date.now(),
+    status: 'pending',
+  };
+  const all = getPendingInvites();
+  all.push(full);
+  localStorage.setItem(INVITE_KEY, JSON.stringify(all));
+  return full;
+}
+
+function AllMembersTable({ teams }: { teams: any[] }) {
+  // Flatten all members across all teams, annotating with team info
+  const allMembers = teams.flatMap(team =>
+    team.members.map((member: TeamMember) => ({
+      ...member,
+      teamId: team.id,
+      teamName: team.name,
+    })),
+  );
+
+  // Group by principalId to show team(s) per member
+  const memberMap = new Map<string, { member: TeamMember; teams: string[] }>();
+  allMembers.forEach((m: any) => {
+    const key = m.principalId || m.email || m.principal?.toString();
+    const existing = memberMap.get(key);
+    if (existing) {
+      if (!existing.teams.includes(m.teamName)) existing.teams.push(m.teamName);
+    } else {
+      memberMap.set(key, { member: m, teams: [m.teamName] });
+    }
+  });
+
+  const uniqueMembers = Array.from(memberMap.values());
+
+  if (uniqueMembers.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <div className="p-6 rounded-2xl bg-muted/20 mb-4">
+          <UserCog className="h-12 w-12 text-muted-foreground" />
+        </div>
+        <h3 className="text-lg font-semibold mb-2">No members yet</h3>
+        <p className="text-sm text-muted-foreground max-w-md">Add members to your teams to see them here</p>
+      </div>
+    );
+  }
+
+  return (
+    <ScrollArea className="h-[400px]">
+      {/* Table header */}
+      <div className="grid grid-cols-[1fr_1fr_1fr_80px_100px] gap-2 px-3 py-2 text-xs font-medium text-muted-foreground border-b border-border/40 mb-1 sticky top-0 bg-background/80 backdrop-blur-sm z-10">
+        <span>Name</span>
+        <span>Email</span>
+        <span>Team(s)</span>
+        <span>Role</span>
+        <span>Joined</span>
+      </div>
+      <div className="space-y-1">
+        {uniqueMembers.map(({ member, teams: memberTeams }, idx) => (
+          <div
+            key={member.principalId || idx}
+            className="grid grid-cols-[1fr_1fr_1fr_80px_100px] gap-2 px-3 py-2.5 rounded-lg glass-effect border border-border/40 items-center animate-slide-in"
+          >
+            <span className="text-sm truncate font-medium">
+              {member.name || 'Unknown'}
+            </span>
+            <span className="text-xs text-muted-foreground truncate">
+              {member.email || '-'}
+            </span>
+            <div className="flex flex-wrap gap-1">
+              {memberTeams.map((t, i) => (
+                <Badge key={i} variant="secondary" className="text-[10px]">{t}</Badge>
+              ))}
+            </div>
+            <Badge variant="outline" className="text-xs w-fit capitalize">{member.role}</Badge>
+            <span className="text-xs text-muted-foreground">
+              {member.joinedAt
+                ? new Date(Number(member.joinedAt) / 1000000).toLocaleDateString()
+                : '-'}
+            </span>
+          </div>
+        ))}
+      </div>
+    </ScrollArea>
   );
 }
 

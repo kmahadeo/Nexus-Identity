@@ -6,6 +6,7 @@ import { Sparkles, X, Send, Loader2, Settings2 } from 'lucide-react';
 import { useGetVaultEntries, useGetRecommendations, useChatWithAI } from './hooks/useQueries';
 import { toast } from 'sonner';
 import { settings as appSettings } from './lib/storage';
+import { logError } from './lib/logger';
 import type { AIContext } from './backend';
 
 interface Message {
@@ -86,7 +87,7 @@ export default function FloatingAICoach({ currentPage = 'dashboard', embedded = 
   const getContextualGreeting = (page: string) => {
     const aiSource = hasApiKey ? 'Claude (Anthropic)' : 'local security heuristics';
     const greetings: Record<string, string> = {
-      dashboard: `Hi! I'm your Nexus AI Security Coach, powered by ${aiSource}. I analyse your vault health, auth events and threat posture in real-time. What can I help you with?`,
+      dashboard: `I'm your Nexus Security Advisor. I analyse vault health, auth events, and threat posture using local rule-based analysis. No data leaves your browser. What can I help with?`,
       passkeys:  `Passkeys use FIDO2/WebAuthn — the private key is generated in your device's secure enclave and never leaves it. Authentication is phishing-proof and domain-scoped. Click "Register Passkey" to try it for real.`,
       vault:     `Your vault uses AES-256-GCM with a PBKDF2-derived key. I can help you audit password strength, detect reuse, or rotate stale credentials. What would you like to review?`,
       biometric: `Biometric authentication binds a FIDO2 credential to your platform authenticator (Touch ID, Face ID, Windows Hello). The biometric data stays on-device — Nexus never sees it.`,
@@ -184,7 +185,7 @@ export default function FloatingAICoach({ currentPage = 'dashboard', embedded = 
           setMessages(prev => [...prev, aiMessage]);
         },
         onError: (error) => {
-          console.error('Chat error:', error);
+          logError('Chat error:', error);
           // Fallback to local response
           const fallbackResponse = generateLocalResponse(currentInput, currentPage, vaultEntries, recommendations);
           setMessages(prev => [...prev, fallbackResponse]);
@@ -268,7 +269,7 @@ export default function FloatingAICoach({ currentPage = 'dashboard', embedded = 
           <Sparkles className="h-4 w-4 text-violet-400" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-white/80">AI Security Coach</p>
+          <p className="text-sm font-medium text-white/80">Security Advisor</p>
           <p className="text-[10px] text-white/35 flex items-center gap-1">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
             {hasApiKey ? 'Claude (Anthropic) · ' : 'Local mode · '}
@@ -277,7 +278,7 @@ export default function FloatingAICoach({ currentPage = 'dashboard', embedded = 
         </div>
         {!hasApiKey && (
           <button
-            onClick={() => toast.info('Add your Anthropic API key in Settings → AI Coach')}
+            onClick={() => toast.info('Add your Anthropic API key in Settings → Integrations')}
             className="h-6 px-2 rounded-full text-[10px] font-mono text-white/40 hover:text-white/70 transition-colors"
             style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
           >

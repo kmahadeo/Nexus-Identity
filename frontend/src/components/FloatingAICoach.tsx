@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { Sparkles, X, Send, Brain } from 'lucide-react';
+import { Shield, X, Send, Brain } from 'lucide-react';
 import { useGetVaultEntries, useGetRecommendations, useGetPasskeyCount, useGetTeams } from '../hooks/useQueries';
 import { computeSecurityScore, generateInsights, generateContextualResponse, type SecurityState } from '../lib/securityEngine';
 
@@ -47,10 +47,24 @@ export default function FloatingAICoach({ currentPage = 'dashboard' }: FloatingA
     }
   }, [messages]);
 
-  // Greeting when opened
+  // Greeting when opened — honest about being rule-based
   useEffect(() => {
     if (isOpen && messages.length === 0) {
-      const greeting = `Hi! I'm your security coach. Your score is ${score}/100 with ${vaultEntries.length} vault entries and ${passkeyCount} passkeys. ${hasCritical ? 'I see critical issues that need attention.' : 'Things look good.'} Ask me anything about your security posture.`;
+      const criticalInsights = insights.filter((i) => i.priority === 'critical');
+      const highInsights = insights.filter((i) => i.priority === 'high');
+      let greeting = `Security Advisor (rule-based, local analysis)\n\nScore: ${score}/100 | ${vaultEntries.length} vault entries | ${passkeyCount} passkeys`;
+      if (criticalInsights.length > 0) {
+        greeting += `\n\n${criticalInsights.length} critical issue${criticalInsights.length !== 1 ? 's' : ''} found:\n`;
+        criticalInsights.forEach((i) => { greeting += `- ${i.message}\n`; });
+      }
+      if (highInsights.length > 0) {
+        greeting += `\n${highInsights.length} high-priority issue${highInsights.length !== 1 ? 's' : ''}:\n`;
+        highInsights.forEach((i) => { greeting += `- ${i.message}\n`; });
+      }
+      if (criticalInsights.length === 0 && highInsights.length === 0) {
+        greeting += `\n\nNo critical or high-priority issues. Your posture looks solid.`;
+      }
+      greeting += `\n\nAsk about your score breakdown, specific credentials, weak passwords, or what to fix next.`;
       setMessages([
         {
           id: '1',
@@ -96,7 +110,7 @@ export default function FloatingAICoach({ currentPage = 'dashboard' }: FloatingA
           {isOpen ? (
             <X className="h-6 w-6 text-white" />
           ) : (
-            <Sparkles className="h-6 w-6 text-white" />
+            <Shield className="h-6 w-6 text-white" />
           )}
           {!isOpen && hasCritical && (
             <div className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-destructive animate-pulse" />
@@ -111,17 +125,16 @@ export default function FloatingAICoach({ currentPage = 'dashboard' }: FloatingA
             <CardHeader className="border-b border-border/40 bg-gradient-to-br from-primary/10 to-accent/5">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-xl bg-gradient-to-br from-primary/20 to-accent/10 shadow-depth-sm">
-                  <Sparkles className="h-5 w-5 text-primary" />
+                  <Shield className="h-5 w-5 text-primary" />
                 </div>
                 <div className="flex-1">
-                  <CardTitle className="text-lg">Security Coach</CardTitle>
+                  <CardTitle className="text-lg">Security Advisor</CardTitle>
                   <CardDescription className="text-xs flex items-center gap-1">
-                    <div className="h-2 w-2 rounded-full bg-success" />
-                    Score: {score}/100 &bull; {currentPage}
+                    <Brain className="h-3 w-3" />
+                    Rule-based &bull; Score: {score}/100
                   </CardDescription>
                 </div>
                 <Badge variant="secondary" className="text-xs">
-                  <Brain className="h-3 w-3 mr-1" />
                   Local
                 </Badge>
               </div>
@@ -172,7 +185,7 @@ export default function FloatingAICoach({ currentPage = 'dashboard' }: FloatingA
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2 text-center">
-                  Client-side analysis &bull; No external API calls
+                  Rule-based local analysis &bull; No data leaves your browser
                 </p>
               </div>
             </CardContent>
