@@ -145,10 +145,10 @@ export async function initiateAppleLogin(): Promise<void> {
   pkceStorage.save({ provider: 'apple', state, codeVerifier: nonce, redirectUri, startedAt: Date.now() });
 
   const params = new URLSearchParams({
-    response_type: 'code id_token',
+    response_type: 'id_token',
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: 'name email',
+    scope: 'openid',
     state,
     nonce,
     response_mode: 'fragment',
