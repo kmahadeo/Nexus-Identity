@@ -15,7 +15,7 @@ import {
   Shield, Key, Lock, Eye, Target, Users, Plug, LogOut, Bell,
   Settings, Code, Brain, Network, ChevronLeft, ChevronRight,
   Sparkles, Crown, Building2, HelpCircle, BookOpen, CreditCard,
-  AlertTriangle, LayoutGrid, ChevronDown,
+  AlertTriangle, LayoutGrid, ChevronDown, Menu, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import SecurityDashboard from './SecurityDashboard';
@@ -146,6 +146,7 @@ export default function MainApp() {
   const [activeView, setActiveView]         = useState<NavItem>(getDefaultView);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [aiCoachOpen, setAiCoachOpen]       = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [helpOpen, setHelpOpen]             = useState(false);
@@ -280,9 +281,19 @@ export default function MainApp() {
           style={{ background: `radial-gradient(circle, ${accent.bg} 0%, transparent 70%)` }} />
       </div>
 
+      {/* ── Mobile sidebar backdrop ── */}
+      {mobileSidebarOpen && (
+        <div
+          className="fixed inset-0 z-20 bg-black/60 md:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+
       {/* ── Sidebar ── */}
       <aside
-        className={`relative z-20 flex flex-col aurora-panel-strong transition-all duration-300 ${
+        className={`fixed inset-y-0 left-0 z-30 flex flex-col aurora-panel-strong transition-all duration-300 transform ${
+          mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        } md:translate-x-0 md:relative md:flex ${
           sidebarCollapsed ? 'w-[68px]' : 'w-[220px]'
         }`}
         style={{ borderRight: '1px solid rgba(255,255,255,0.06)' }}
@@ -344,6 +355,7 @@ export default function MainApp() {
                   onClick={() => {
                     setActiveView(item.id);
                     if (hasSubmenu) toggleNavExpand(item.id);
+                    if (!hasSubmenu) setMobileSidebarOpen(false);
                   }}
                   className={`w-full flex items-center gap-2.5 rounded-pill text-sm font-medium transition-all btn-press ${
                     sidebarCollapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2'
@@ -370,7 +382,7 @@ export default function MainApp() {
                     {ADMIN_SUB_ITEMS.map(sub => (
                       <button
                         key={sub.id}
-                        onClick={() => navigateToSection('admin', sub.sectionId)}
+                        onClick={() => { navigateToSection('admin', sub.sectionId); setMobileSidebarOpen(false); }}
                         className="w-full text-left px-2.5 py-1.5 text-xs text-white/40 hover:text-white/70 hover:bg-white/[0.04] rounded-md transition-colors btn-press"
                       >
                         {sub.label}
@@ -409,8 +421,8 @@ export default function MainApp() {
           </button>
         </div>
 
-        {/* Collapse toggle */}
-        <div className="px-2 py-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+        {/* Collapse toggle — desktop only */}
+        <div className="hidden md:block px-2 py-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             className="w-full flex items-center justify-center py-1.5 rounded-md text-white/25 hover:text-white/55 transition-colors"
@@ -461,18 +473,28 @@ export default function MainApp() {
       <div className="flex-1 flex flex-col min-w-0 relative z-10">
         {/* Top bar */}
         <header
-          className="flex items-center justify-between px-6 py-3 aurora-panel-subtle"
+          className="flex items-center justify-between px-3 md:px-6 py-3 aurora-panel-subtle"
           style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
         >
-          <div>
-            <h1 className="text-sm font-semibold text-white/90 tracking-tight">
-              {allNavItems.find(n => n.id === activeView)?.label || 'Dashboard'}
-            </h1>
-            <p className="text-[10px] text-white/30 font-mono uppercase tracking-[0.12em]">
-              {config.label} TIER · {roleConfig.label}{hasFeature('auditLogging') && ' · AUDIT ACTIVE'}
-              {isGuest && ' · READ-ONLY'}
-              {isContractor && ' · LIMITED ACCESS'}
-            </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 rounded-full text-white/50 hover:text-white/80 hover:bg-white/[0.06] md:hidden"
+              onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+            >
+              {mobileSidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </Button>
+            <div>
+              <h1 className="text-sm font-semibold text-white/90 tracking-tight">
+                {allNavItems.find(n => n.id === activeView)?.label || 'Dashboard'}
+              </h1>
+              <p className="text-[10px] text-white/30 font-mono uppercase tracking-[0.12em] hidden md:block">
+                {config.label} TIER · {roleConfig.label}{hasFeature('auditLogging') && ' · AUDIT ACTIVE'}
+                {isGuest && ' · READ-ONLY'}
+                {isContractor && ' · LIMITED ACCESS'}
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-1.5">
             {isDemoModeActive() && (
@@ -520,7 +542,7 @@ export default function MainApp() {
         {/* Demo mode banner */}
         {isDemoModeActive() && (
           <div
-            className="flex items-center justify-between gap-3 px-6 py-2"
+            className="flex items-center justify-between gap-3 px-3 md:px-6 py-2"
             style={{ background: 'rgba(167,139,250,0.08)', borderBottom: '1px solid rgba(167,139,250,0.18)' }}
           >
             <p className="text-xs text-violet-300">
@@ -538,7 +560,7 @@ export default function MainApp() {
         {/* Passkey security banner for non-guest users with 0 passkeys */}
         {!isGuest && loadPasskeys(session?.principalId).length === 0 && (
           <div
-            className="flex items-center gap-3 px-6 py-2.5"
+            className="flex items-center gap-3 px-3 md:px-6 py-2.5"
             style={{ background: 'rgba(245,158,11,0.10)', borderBottom: '1px solid rgba(245,158,11,0.20)' }}
           >
             <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
@@ -557,7 +579,7 @@ export default function MainApp() {
 
         {/* Content + AI side-rail */}
         <div className="flex-1 flex overflow-hidden">
-          <main className="flex-1 overflow-y-auto p-6">
+          <main className="flex-1 overflow-y-auto p-3 md:p-6">
             <div className="animate-fade-in">
               <PageErrorBoundary pageName={allNavItems.find(n => n.id === activeView)?.label ?? activeView} key={activeView}>
                 {activeView === 'dashboard'    && <SecurityDashboard onNavigate={(view) => setActiveView(view as NavItem)} />}
@@ -579,7 +601,7 @@ export default function MainApp() {
 
           {aiCoachOpen && (
             <aside
-              className="w-[380px] overflow-hidden flex flex-col animate-slide-in aurora-panel-strong"
+              className="fixed inset-0 z-40 md:relative md:inset-auto md:z-auto md:w-[380px] overflow-hidden flex flex-col animate-slide-in aurora-panel-strong"
               style={{ borderLeft: '1px solid rgba(255,255,255,0.06)' }}
             >
               <FloatingAICoach currentPage={activeView} embedded onClose={() => setAiCoachOpen(false)} />

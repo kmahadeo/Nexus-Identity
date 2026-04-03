@@ -957,6 +957,39 @@ export default function SettingsPanel() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Email Service Configuration */}
+          <Card className="border-border/40 glass-strong shadow-depth-md">
+            <CardHeader>
+              <CardTitle>Email Service</CardTitle>
+              <CardDescription>Configure email for invites and notifications. Currently supports Resend.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-sm">Resend API Key</Label>
+                <div className="flex gap-2">
+                  <Input
+                    type="password"
+                    placeholder="re_..."
+                    className="glass-effect flex-1"
+                    defaultValue={(() => { try { return JSON.parse(localStorage.getItem('nexus-email-config') ?? '{}').apiKey || ''; } catch { return ''; } })()}
+                    onChange={(e) => {
+                      const key = e.target.value.trim();
+                      const cfg = { provider: key ? 'resend' as const : 'none' as const, apiKey: key, fromEmail: 'noreply@nexus-identity.io', fromName: 'Nexus Identity' };
+                      localStorage.setItem('nexus-email-config', JSON.stringify(cfg));
+                    }}
+                  />
+                  <Button variant="outline" size="sm" className="rounded-full btn-press" onClick={() => {
+                    const cfg = JSON.parse(localStorage.getItem('nexus-email-config') ?? '{}');
+                    toast.success(cfg.apiKey ? 'Email service configured with Resend' : 'Email service not configured');
+                  }}>
+                    Test
+                  </Button>
+                </div>
+                <p className="text-xs text-white/30">Get a free API key at resend.com. 100 emails/day on free tier.</p>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

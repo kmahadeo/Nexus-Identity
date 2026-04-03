@@ -15,13 +15,14 @@ import {
   Brain, Shield, AlertTriangle, Users, Activity, Zap, CheckCircle2, Target,
   FileText, ExternalLink, UserX, RefreshCw, Download, Plus, Eye, HelpCircle,
   Clock, MessageSquare, CheckSquare, Key, BarChart3, FolderSync,
-  Monitor, LogOut, ShieldAlert, Timer, Flame, Lock, Unlock, Pin, PinOff,
+  Monitor, LogOut, ShieldAlert, Timer, Flame, Lock, Unlock, Pin, PinOff, Bot,
 } from 'lucide-react';
 import { PinButton } from './CustomDashboard';
 import HardwareKeyManagement from './HardwareKeyManagement';
 import DirectorySync from './DirectorySync';
 import ProtectedReports from './ProtectedReports';
 import UserManagement from './UserManagement';
+import ServiceAccounts from './ServiceAccounts';
 import { toast } from 'sonner';
 import {
   useGetAllUsers, useDeactivateUser, useGetPolicies, useTogglePolicy, useAddPolicy,
@@ -662,6 +663,27 @@ export default function AdminIntelligence() {
         <CardContent>
           <SectionErrorBoundary sectionName="UserManagement">
             <UserManagement />
+          </SectionErrorBoundary>
+        </CardContent>
+      </Card>
+
+      {/* ── Service Accounts & Non-Human Identity ──────────────────────── */}
+      <Card id="section-service-accounts" className="border-border/40 glass-strong shadow-depth-md">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-violet-500/10"><Bot className="h-5 w-5 text-violet-400" /></div>
+              <div>
+                <CardTitle className="text-base">Service Accounts & Non-Human Identity</CardTitle>
+                <CardDescription>Manage machine identities, API keys, rotation policies, and NHI lifecycle</CardDescription>
+              </div>
+            </div>
+            <PinButton sectionId="admin-service-accounts" principalId={pinPrincipalId} />
+          </div>
+        </CardHeader>
+        <CardContent>
+          <SectionErrorBoundary sectionName="ServiceAccounts">
+            <ServiceAccounts />
           </SectionErrorBoundary>
         </CardContent>
       </Card>

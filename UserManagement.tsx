@@ -7,6 +7,7 @@
  */
 
 import { useState, useMemo } from 'react';
+import { sendInviteEmail, isEmailConfigured } from './lib/emailService';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -183,6 +184,12 @@ export default function UserManagement() {
     });
     localStorage.setItem('nexus-user-registry', JSON.stringify(all));
     roleRegistry.save({ email, name, role: newUser.role as any, tier: 'individual', principalId });
+
+    // Send invite email if email service is configured
+    const session = sessionStorage_.get();
+    sendInviteEmail(email, session?.name || 'Admin', newUser.role).then(sent => {
+      if (sent) toast.success(`Invite email sent to ${email}`);
+    }).catch(() => {});
 
     setShowAddUser(false);
     setNewUser({ firstName: '', lastName: '', email: '', role: 'individual' });

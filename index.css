@@ -591,8 +591,11 @@
 
 @media (max-width: 768px) {
   .card-tactile:hover { transform: none; }
-  .aura-auth-panel { padding: 32px 24px; border-radius: 32px; }
-  .aura-top-bar { top: 20px; right: 20px; }
+  .aura-layout-grid { padding: 16px; align-content: center; justify-items: center; }
+  .aura-auth-panel { padding: 24px 18px; border-radius: 24px; max-width: 100%; gap: 20px; }
+  .aura-auth-wrapper { padding-left: 0; }
+  .aura-top-bar { top: 12px; right: 12px; }
+  .aura-h1 { font-size: clamp(20px, 5vw, 28px) !important; }
 }
 
 @media (hover: none) and (pointer: coarse) {

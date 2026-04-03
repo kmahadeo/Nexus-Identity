@@ -334,10 +334,9 @@ export default function LandingPage() {
 
       {/* Main grid */}
       <div className="aura-layout-grid">
-        {/* Left branding panel */}
-        <div style={{
+        {/* Left branding panel — hidden on mobile/tablet */}
+        <div className="hidden md:flex" style={{
           gridColumn: 1,
-          display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center',
           gap: '40px',
