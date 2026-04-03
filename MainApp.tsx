@@ -48,12 +48,12 @@ interface AdminSubItem {
 }
 
 const ADMIN_SUB_ITEMS: AdminSubItem[] = [
+  { id: 'admin-sessions',  label: 'Sessions',         sectionId: 'section-sessions' },
   { id: 'admin-users',     label: 'Users',            sectionId: 'section-users' },
   { id: 'admin-service',   label: 'Service Accounts', sectionId: 'section-service-accounts' },
   { id: 'admin-policies',  label: 'Policies',         sectionId: 'section-policies' },
   { id: 'admin-directory', label: 'Directory Sync',   sectionId: 'section-directory-sync' },
   { id: 'admin-hardware',  label: 'Hardware Keys',    sectionId: 'section-hardware-keys' },
-  { id: 'admin-sessions',  label: 'Sessions',         sectionId: 'section-sessions' },
   { id: 'admin-reports',   label: 'Reports',          sectionId: 'section-reports' },
   { id: 'admin-support',   label: 'Support Tickets',  sectionId: 'section-support' },
 ];
