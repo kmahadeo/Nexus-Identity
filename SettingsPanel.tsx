@@ -962,31 +962,51 @@ export default function SettingsPanel() {
           <Card className="border-border/40 glass-strong shadow-depth-md">
             <CardHeader>
               <CardTitle>Email Service</CardTitle>
-              <CardDescription>Configure email for invites and notifications. Currently supports Resend.</CardDescription>
+              <CardDescription>Configure email for invites and notifications</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label className="text-sm">Resend API Key</Label>
+                <Label className="text-sm">Provider</Label>
+                <Select
+                  defaultValue={(() => { try { return JSON.parse(localStorage.getItem('nexus-email-config') ?? '{}').provider || 'none'; } catch { return 'none'; } })()}
+                  onValueChange={(v) => {
+                    const existing = (() => { try { return JSON.parse(localStorage.getItem('nexus-email-config') ?? '{}'); } catch { return {}; } })();
+                    localStorage.setItem('nexus-email-config', JSON.stringify({ ...existing, provider: v, fromEmail: existing.fromEmail || 'noreply@nexus-identity.io', fromName: existing.fromName || 'Nexus Identity' }));
+                  }}
+                >
+                  <SelectTrigger className="glass-effect w-48"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not configured</SelectItem>
+                    <SelectItem value="brevo">Brevo (300/day free)</SelectItem>
+                    <SelectItem value="resend">Resend (100/day free)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm">API Key</Label>
                 <div className="flex gap-2">
                   <Input
                     type="password"
-                    placeholder="re_..."
+                    placeholder="Enter your API key"
                     className="glass-effect flex-1"
                     defaultValue={(() => { try { return JSON.parse(localStorage.getItem('nexus-email-config') ?? '{}').apiKey || ''; } catch { return ''; } })()}
                     onChange={(e) => {
+                      const existing = (() => { try { return JSON.parse(localStorage.getItem('nexus-email-config') ?? '{}'); } catch { return {}; } })();
                       const key = e.target.value.trim();
-                      const cfg = { provider: key ? 'resend' as const : 'none' as const, apiKey: key, fromEmail: 'noreply@nexus-identity.io', fromName: 'Nexus Identity' };
-                      localStorage.setItem('nexus-email-config', JSON.stringify(cfg));
+                      const provider = existing.provider || (key.startsWith('xkeysib-') ? 'brevo' : key.startsWith('re_') ? 'resend' : existing.provider || 'none');
+                      localStorage.setItem('nexus-email-config', JSON.stringify({ ...existing, provider: key ? provider : 'none', apiKey: key }));
                     }}
                   />
                   <Button variant="outline" size="sm" className="rounded-full btn-press" onClick={() => {
-                    const cfg = JSON.parse(localStorage.getItem('nexus-email-config') ?? '{}');
-                    toast.success(cfg.apiKey ? 'Email service configured with Resend' : 'Email service not configured');
+                    const cfg = (() => { try { return JSON.parse(localStorage.getItem('nexus-email-config') ?? '{}'); } catch { return {}; } })();
+                    toast.success(cfg.apiKey ? `Email configured with ${cfg.provider} (${cfg.provider === 'brevo' ? '300' : '100'}/day free)` : 'Email service not configured');
                   }}>
-                    Test
+                    Save
                   </Button>
                 </div>
-                <p className="text-xs text-white/30">Get a free API key at resend.com. 100 emails/day on free tier.</p>
+                <p className="text-xs text-white/30">
+                  Brevo: get key at brevo.com → SMTP & API → API Keys. Resend: get key at resend.com → API Keys.
+                </p>
               </div>
             </CardContent>
           </Card>

@@ -1,15 +1,14 @@
 /**
  * lib/emailService.ts — Email service for invites and notifications.
  *
- * Uses Resend API when configured, falls back to console logging.
+ * Supports: Brevo (300/day free), Resend (100/day free).
  * The API key is stored in localStorage (Settings → Integrations).
- * In production, move to server-side (Cloudflare Worker / Edge Function).
  */
 
 const EMAIL_CONFIG_KEY = 'nexus-email-config';
 
 interface EmailConfig {
-  provider: 'resend' | 'none';
+  provider: 'brevo' | 'resend' | 'none';
   apiKey: string;
   fromEmail: string;
   fromName: string;
@@ -40,11 +39,43 @@ export function isEmailConfigured(): boolean {
 
 /**
  * Send an email via the configured provider.
- * Returns true if sent, false if not configured or failed.
  */
 export async function sendEmail(to: string, subject: string, body: string): Promise<boolean> {
   const cfg = getConfig();
 
+  // ── Brevo (Sendinblue) — 300 emails/day free ──
+  if (cfg.provider === 'brevo' && cfg.apiKey) {
+    try {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': cfg.apiKey,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: cfg.fromName, email: cfg.fromEmail },
+          to: [{ email: to }],
+          subject,
+          textContent: body,
+        }),
+      });
+
+      if (res.ok) {
+        console.log('[Email/Brevo] Sent to', to);
+        return true;
+      } else {
+        const err = await res.json().catch(() => ({}));
+        console.error('[Email/Brevo] Failed:', err);
+        return false;
+      }
+    } catch (e) {
+      console.error('[Email/Brevo] Send error:', e);
+      return false;
+    }
+  }
+
+  // ── Resend — 100 emails/day free ──
   if (cfg.provider === 'resend' && cfg.apiKey) {
     try {
       const res = await fetch('https://api.resend.com/emails', {
@@ -62,20 +93,19 @@ export async function sendEmail(to: string, subject: string, body: string): Prom
       });
 
       if (res.ok) {
-        console.log('[Email] Sent to', to, '—', subject);
+        console.log('[Email/Resend] Sent to', to);
         return true;
       } else {
         const err = await res.json().catch(() => ({}));
-        console.error('[Email] Failed:', err);
+        console.error('[Email/Resend] Failed:', err);
         return false;
       }
     } catch (e) {
-      console.error('[Email] Send error:', e);
+      console.error('[Email/Resend] Send error:', e);
       return false;
     }
   }
 
-  // Not configured — log to console
   console.log('[Email] Not configured. Would send to:', to, '| Subject:', subject);
   return false;
 }
@@ -99,9 +129,9 @@ Your role: ${role}
 Get started here: ${appUrl}
 
 What you can do:
-• Register a passkey for phishing-proof authentication
-• Store credentials in an encrypted vault
-• Manage your security posture with real-time threat scanning
+- Register a passkey for phishing-proof authentication
+- Store credentials in an encrypted vault
+- Manage your security posture with real-time threat scanning
 
 This invitation doesn't expire. When you sign up, your role and permissions will be automatically assigned.
 
