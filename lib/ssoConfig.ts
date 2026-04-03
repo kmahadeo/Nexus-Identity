@@ -54,8 +54,12 @@ function defaultConfig(): SSOConfig {
 
 /* ── Google ───────────────────────────────────────────────────────────────── */
 
-/** Get the stored Google OAuth Client ID. */
+/** Get the Google OAuth Client ID — checks env var first, then localStorage. */
 export function getGoogleConfig(): string {
+  // Env var takes priority (baked into build, always available)
+  const envClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  if (envClientId) return envClientId;
+  // Fall back to localStorage (configured in Settings)
   return getConfig().google.clientId;
 }
 
