@@ -6,6 +6,7 @@ import { activeSessionStorage, type ActiveSession } from '../lib/permissions';
 import { profilesDB, sessionsDB, auditDB } from '../lib/supabaseStorage';
 import { markVaultVerified } from '../lib/vaultCrypto';
 import { migrateAllToSupabase } from '../lib/migrateToSupabase';
+import { syncFromSupabase } from '../lib/syncFromSupabase';
 
 interface Identity {
   getPrincipal(): { toText(): string };
@@ -83,15 +84,17 @@ export function InternetIdentityProvider({ children }: { children: ReactNode }) 
     setSession(s);
     setLoginStatus('logged-in');
 
-    // Sync all localStorage data to Supabase on every login
-    // (not just first time — ensures nothing is missed)
+    // Step 1: Restore data FROM Supabase if localStorage is empty (new device / cache cleared)
+    syncFromSupabase(principalId, email).then((restored) => {
+      if (restored.length > 0) {
+        console.log('[Supabase] Restored from cloud:', restored.join(', '));
+      }
+    }).catch(() => {});
+
+    // Step 2: Sync localStorage data TO Supabase (pushes any new local data)
     migrateAllToSupabase().then(({ migrated, errors }) => {
-      if (migrated.length > 0) {
-        console.log('[Supabase] Synced:', migrated.join(', '));
-      }
-      if (errors.length > 0) {
-        console.error('[Supabase] Sync errors:', errors.join('; '));
-      }
+      if (migrated.length > 0) console.log('[Supabase] Synced to cloud:', migrated.join(', '));
+      if (errors.length > 0) console.error('[Supabase] Sync errors:', errors.join('; '));
     }).catch((e) => console.error('[Supabase] Migration failed:', e));
   }, []);
 
