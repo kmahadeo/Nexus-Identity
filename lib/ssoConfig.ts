@@ -144,14 +144,19 @@ export async function initiateAppleLogin(): Promise<void> {
 
   pkceStorage.save({ provider: 'apple', state, codeVerifier: nonce, redirectUri, startedAt: Date.now() });
 
+  // Apple requires form_post for code id_token flow
+  // We use a Cloudflare Pages Function at /apple-callback to receive the POST
+  // and redirect back with the id_token in the URL fragment
+  const callbackUrl = window.location.origin + '/apple-callback';
+
   const params = new URLSearchParams({
-    response_type: 'id_token',
+    response_type: 'code id_token',
     client_id: clientId,
-    redirect_uri: redirectUri,
-    scope: 'openid',
+    redirect_uri: callbackUrl,
+    scope: 'name email',
     state,
     nonce,
-    response_mode: 'fragment',
+    response_mode: 'form_post',
   });
 
   window.location.href = `https://appleid.apple.com/auth/authorize?${params}`;
