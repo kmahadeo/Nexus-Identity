@@ -83,15 +83,16 @@ export function InternetIdentityProvider({ children }: { children: ReactNode }) 
     setSession(s);
     setLoginStatus('logged-in');
 
-    // One-time migration: push all existing localStorage data to Supabase
-    const migrationKey = `nexus-migrated-${principalId}`;
-    if (!sessionStorage.getItem(migrationKey)) {
-      sessionStorage.setItem(migrationKey, '1');
-      migrateAllToSupabase().then(({ migrated, errors }) => {
-        if (migrated.length > 0) console.log('[Migration] Synced:', migrated.join(', '));
-        if (errors.length > 0) console.warn('[Migration] Errors:', errors.join('; '));
-      }).catch(() => {});
-    }
+    // Sync all localStorage data to Supabase on every login
+    // (not just first time — ensures nothing is missed)
+    migrateAllToSupabase().then(({ migrated, errors }) => {
+      if (migrated.length > 0) {
+        console.log('[Supabase] Synced:', migrated.join(', '));
+      }
+      if (errors.length > 0) {
+        console.error('[Supabase] Sync errors:', errors.join('; '));
+      }
+    }).catch((e) => console.error('[Supabase] Migration failed:', e));
   }, []);
 
   /**
