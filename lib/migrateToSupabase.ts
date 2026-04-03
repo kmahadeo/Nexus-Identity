@@ -210,11 +210,13 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
     let polCount = 0;
     for (const p of policies) {
       if (existingPolicyNames.has(p.name)) continue;
+      // Resolve the creator's pid — might be from a different login session
+      const creatorPid = await resolveOrCreatePrincipal(client, p.createdBy || pid, session.email);
       const { error } = await client.from('security_policies').insert({
         name: p.name, description: p.description || '', type: p.type || 'password',
         severity: p.severity || 'medium', enforcement: p.enforcement || 'warn',
         enabled: p.enabled ?? true, config: p.config || {},
-        created_by: p.createdBy || pid,
+        created_by: creatorPid,
       });
       if (error) errors.push(`policy ${p.name}: ${error.message}`);
       else { polCount++; existingPolicyNames.add(p.name); }
