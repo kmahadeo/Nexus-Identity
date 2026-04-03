@@ -625,21 +625,26 @@ export default function LandingPage() {
                   </p>
                 </div>
 
-                {/* Demo Access */}
+                {/* Demo Access — prominent button */}
                 {!showDemoAccess ? (
                   <button
                     onClick={() => setShowDemoAccess(true)}
                     style={{
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      fontFamily: 'JetBrains Mono, monospace', fontSize: '10px',
-                      letterSpacing: '0.08em', color: 'var(--aura-text-tech)',
-                      textAlign: 'center', padding: '4px 0',
-                      opacity: 0.6, transition: 'opacity 0.18s ease',
+                      width: '100%', padding: '10px 16px',
+                      background: 'linear-gradient(135deg, rgba(167,139,250,0.12), rgba(139,92,246,0.08))',
+                      border: '1px solid rgba(167,139,250,0.3)',
+                      borderRadius: '12px', cursor: 'pointer',
+                      fontFamily: 'Space Grotesk, sans-serif', fontSize: '13px',
+                      fontWeight: 600, color: '#a78bfa',
+                      textAlign: 'center',
+                      transition: 'all 0.18s ease',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
                     }}
-                    onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
-                    onMouseLeave={e => { e.currentTarget.style.opacity = '0.6'; }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(167,139,250,0.2), rgba(139,92,246,0.15))'; e.currentTarget.style.borderColor = 'rgba(167,139,250,0.5)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(167,139,250,0.12), rgba(139,92,246,0.08))'; e.currentTarget.style.borderColor = 'rgba(167,139,250,0.3)'; }}
                   >
-                    DEMO ACCESS
+                    <span style={{ fontSize: '15px' }}>&#x1F6E1;</span>
+                    Try Demo Mode — Full Platform Access
                   </button>
                 ) : (
                   <div style={{
