@@ -185,10 +185,20 @@ export default function UserManagement() {
     localStorage.setItem('nexus-user-registry', JSON.stringify(all));
     roleRegistry.save({ email, name, role: newUser.role as any, tier: 'individual', principalId });
 
-    // Send invite email if email service is configured
+    // Sync new user to Supabase
+    import('./lib/supabaseStorage').then(({ profilesDB }) => {
+      profilesDB.upsert({
+        principal_id: principalId, email, name, role: newUser.role,
+        tier: 'individual', is_active: true, mfa_enabled: false,
+        passkeys_count: 0, vault_count: 0,
+      }).catch(() => {});
+    });
+
+    // Send invite email
     const session = sessionStorage_.get();
     sendInviteEmail(email, session?.name || 'Admin', newUser.role).then(sent => {
       if (sent) toast.success(`Invite email sent to ${email}`);
+      else toast.info(`${name} added — configure email in Settings to send invites`);
     }).catch(() => {});
 
     setShowAddUser(false);

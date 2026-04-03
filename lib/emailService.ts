@@ -16,12 +16,17 @@ interface EmailConfig {
 
 function getConfig(): EmailConfig {
   try {
-    return JSON.parse(localStorage.getItem(EMAIL_CONFIG_KEY) ?? 'null') ?? {
-      provider: 'none', apiKey: '', fromEmail: 'noreply@nexus-identity.io', fromName: 'Nexus Identity',
-    };
-  } catch {
-    return { provider: 'none', apiKey: '', fromEmail: 'noreply@nexus-identity.io', fromName: 'Nexus Identity' };
+    const stored = JSON.parse(localStorage.getItem(EMAIL_CONFIG_KEY) ?? 'null');
+    if (stored?.apiKey) return stored;
+  } catch {}
+
+  // Fall back to env var
+  const envBrevoKey = import.meta.env.VITE_BREVO_API_KEY;
+  if (envBrevoKey) {
+    return { provider: 'brevo', apiKey: envBrevoKey, fromEmail: 'kaushik.mahadeokar@gmail.com', fromName: 'Nexus Identity' };
   }
+
+  return { provider: 'none', apiKey: '', fromEmail: 'noreply@nexus-identity.io', fromName: 'Nexus Identity' };
 }
 
 export function saveEmailConfig(config: EmailConfig): void {
