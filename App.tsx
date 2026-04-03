@@ -59,21 +59,27 @@ export default function App() {
         // Google sends email, name, picture in payload
         const email = (payload?.email || '').trim().toLowerCase();
         if (email) {
-          // Check localStorage first, then Supabase for existing user
-          let existing = roleRegistry.get(email);
+          // Check Supabase FIRST (source of truth), then fall back to localStorage
+          let existing: { principalId: string; name: string; role: any; tier: any } | null = null;
 
-          // If not in localStorage, check Supabase for existing user/role
-          if (!existing && isSupabaseConfigured()) {
+          if (isSupabaseConfigured()) {
             const client = getSupabase();
             if (client) {
               const { data } = await client.from('profiles')
                 .select('principal_id, name, role, tier')
                 .eq('email', email).maybeSingle();
               if (data) {
-                existing = { principalId: data.principal_id, name: data.name, role: data.role as any, tier: data.tier as any };
-                roleRegistry.save({ email, name: data.name, role: data.role as any, tier: data.tier as any, principalId: data.principal_id });
+                existing = { principalId: data.principal_id, name: data.name, role: data.role, tier: data.tier };
+                // Update localStorage to match Supabase
+                roleRegistry.save({ email, name: data.name, role: data.role, tier: data.tier, principalId: data.principal_id });
               }
             }
+          }
+
+          // Fall back to localStorage only if Supabase didn't have the user
+          if (!existing) {
+            const local = roleRegistry.get(email);
+            if (local) existing = local;
           }
 
           if (existing) {
