@@ -85,9 +85,14 @@ export const profilesDB = {
         .select('principal_id').eq('principal_id', profile.principal_id).maybeSingle();
 
       if (byPid) {
-        // Existing profile with this principal_id — update it
+        // Existing profile with this principal_id — only update safe fields (NOT email/principal_id)
         const { error } = await client.from('profiles')
-          .update(record).eq('principal_id', profile.principal_id);
+          .update({
+            name: record.name, first_name: record.first_name, last_name: record.last_name,
+            alias: record.alias, role: record.role, tier: record.tier,
+            is_active: record.is_active, mfa_enabled: record.mfa_enabled,
+            last_login_at: new Date().toISOString(),
+          }).eq('principal_id', profile.principal_id);
         if (error) console.error('[Supabase] profile UPDATE (by pid) failed:', error.code, error.message);
         else console.log('[Supabase] profile updated:', profile.email);
       } else {
