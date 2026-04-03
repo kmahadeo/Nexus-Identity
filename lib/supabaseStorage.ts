@@ -85,12 +85,11 @@ export const profilesDB = {
         .select('principal_id').eq('principal_id', profile.principal_id).maybeSingle();
 
       if (byPid) {
-        // Existing profile with this principal_id — only update safe fields (NOT email/principal_id)
+        // Existing profile — update name and login time only. NEVER overwrite role/tier
         const { error } = await client.from('profiles')
           .update({
             name: record.name, first_name: record.first_name, last_name: record.last_name,
-            alias: record.alias, role: record.role, tier: record.tier,
-            is_active: record.is_active, mfa_enabled: record.mfa_enabled,
+            alias: record.alias, is_active: true,
             last_login_at: new Date().toISOString(),
           }).eq('principal_id', profile.principal_id);
         if (error) console.error('[Supabase] profile UPDATE (by pid) failed:', error.code, error.message);
@@ -101,11 +100,13 @@ export const profilesDB = {
           .select('principal_id').eq('email', profile.email.toLowerCase()).maybeSingle();
 
         if (byEmail) {
-          // Email exists with different principal_id — update non-key fields only
-          // DO NOT change principal_id — it has child rows (passkeys, vault, etc.)
-          const { principal_id: _skip, ...safeUpdate } = record;
+          // Email exists — update name and login time only. NEVER overwrite role/tier/pid
           const { error } = await client.from('profiles')
-            .update({ ...safeUpdate, last_login_at: new Date().toISOString() })
+            .update({
+              name: record.name, first_name: record.first_name, last_name: record.last_name,
+              alias: record.alias, is_active: true,
+              last_login_at: new Date().toISOString(),
+            })
             .eq('email', profile.email.toLowerCase());
           if (error) console.error('[Supabase] profile UPDATE (by email) failed:', error.code, error.message);
           else console.log('[Supabase] profile updated (email match, kept original pid):', profile.email);
