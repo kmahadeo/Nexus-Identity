@@ -10,7 +10,49 @@
 import { sessionStorage_ } from './storage';
 import { logAuditEvent, getAuditLog } from './auditLog';
 import { auditDB, type AuditRecord } from './supabaseStorage';
+import { getSupabase, isSupabaseConfigured } from './supabase';
 import type { Permission } from './permissions';
+
+/** Sync a service account to Supabase (non-blocking) */
+async function syncAccountToSupabase(account: ServiceAccount, action: 'upsert' | 'delete'): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+  const client = getSupabase();
+  if (!client) return;
+
+  if (action === 'delete') {
+    await client.from('service_accounts').delete().eq('id', account.id);
+    return;
+  }
+
+  // Upsert the account (without apiKeys — those go in a separate table)
+  await client.from('service_accounts').upsert({
+    id: account.id,
+    name: account.name,
+    type: account.type,
+    description: account.description,
+    owner_id: account.ownerId,
+    owner_email: account.ownerEmail,
+    status: account.status,
+    permissions: account.permissions,
+    scopes: account.scopes,
+    rotation_policy: account.rotationPolicy,
+    last_activity: account.lastActivity ? new Date(account.lastActivity).toISOString() : null,
+    expires_at: account.expiresAt ? new Date(account.expiresAt).toISOString() : null,
+  }, { onConflict: 'id' });
+
+  // Sync API keys (hashes only, never plaintext)
+  for (const key of account.apiKeys) {
+    await client.from('service_account_keys').upsert({
+      id: key.id,
+      account_id: account.id,
+      name: key.name,
+      key_prefix: key.keyPrefix,
+      hashed_key: key.hashedKey,
+      expires_at: key.expiresAt ? new Date(key.expiresAt).toISOString() : null,
+      last_used_at: key.lastUsedAt ? new Date(key.lastUsedAt).toISOString() : null,
+    }, { onConflict: 'id' });
+  }
+}
 
 /* ── Types ──────────────────────────────────────────────────────────────── */
 
@@ -167,6 +209,7 @@ export function saveServiceAccount(account: ServiceAccount): void {
     );
   }
   writeAccounts(accounts);
+  syncAccountToSupabase(account, 'upsert').catch(() => {});
 }
 
 /**
@@ -183,6 +226,7 @@ export function deleteServiceAccount(id: string): void {
     );
   }
   writeAccounts(accounts.filter(a => a.id !== id));
+  if (account) syncAccountToSupabase(account, 'delete').catch(() => {});
 }
 
 /**
@@ -194,6 +238,7 @@ export function suspendServiceAccount(id: string): void {
   if (account) {
     account.status = 'suspended';
     writeAccounts(accounts);
+    syncAccountToSupabase(account, 'upsert').catch(() => {});
     logServiceEvent(
       'service_account.suspended',
       id,
@@ -211,6 +256,7 @@ export function activateServiceAccount(id: string): void {
   if (account) {
     account.status = 'active';
     writeAccounts(accounts);
+    syncAccountToSupabase(account, 'upsert').catch(() => {});
     logServiceEvent(
       'service_account.activated',
       id,
@@ -247,6 +293,7 @@ export async function generateApiKey(
 
   account.apiKeys.push(apiKey);
   writeAccounts(accounts);
+  syncAccountToSupabase(account, 'upsert').catch(() => {});
 
   logServiceEvent(
     'service_account.key.generated',
@@ -296,6 +343,13 @@ export function revokeApiKey(accountId: string, keyId: string): boolean {
   const key = account.apiKeys[keyIdx];
   account.apiKeys.splice(keyIdx, 1);
   writeAccounts(accounts);
+  syncAccountToSupabase(account, 'upsert').catch(() => {});
+
+  // Also delete the key from Supabase
+  if (isSupabaseConfigured()) {
+    const client = getSupabase();
+    if (client) client.from('service_account_keys').delete().eq('id', keyId);
+  }
 
   logServiceEvent(
     'service_account.key.revoked',
