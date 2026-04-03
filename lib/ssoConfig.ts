@@ -111,8 +111,10 @@ export function initiateGoogleLogin(): Promise<SSOUserProfile | null> {
 
 /* ── Apple ────────────────────────────────────────────────────────────────── */
 
-/** Get the stored Apple Sign In Client ID (Services ID). */
+/** Get the Apple Sign In Client ID — checks env var first, then localStorage. */
 export function getAppleConfig(): string {
+  const envClientId = import.meta.env.VITE_APPLE_CLIENT_ID;
+  if (envClientId) return envClientId;
   return getConfig().apple.clientId;
 }
 
@@ -133,26 +135,23 @@ export async function initiateAppleLogin(): Promise<void> {
   const clientId = getAppleConfig();
 
   if (!clientId) {
-    // DEMO mode — no client ID configured
     return;
   }
 
-  const verifier = generateCodeVerifier();
-  const challenge = await generateCodeChallenge(verifier);
   const state = generateState();
+  const nonce = generateState();
   const redirectUri = window.location.origin + window.location.pathname;
 
-  pkceStorage.save({ provider: 'apple', state, codeVerifier: verifier, redirectUri, startedAt: Date.now() });
+  pkceStorage.save({ provider: 'apple', state, codeVerifier: nonce, redirectUri, startedAt: Date.now() });
 
   const params = new URLSearchParams({
-    response_type: 'code',
+    response_type: 'code id_token',
     client_id: clientId,
     redirect_uri: redirectUri,
     scope: 'name email',
     state,
-    code_challenge: challenge,
-    code_challenge_method: 'S256',
-    response_mode: 'query',
+    nonce,
+    response_mode: 'fragment',
   });
 
   window.location.href = `https://appleid.apple.com/auth/authorize?${params}`;

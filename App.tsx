@@ -51,24 +51,27 @@ export default function App() {
         const payload = decodeJwtPayload(idToken);
         pkceStorage.clear();
 
-        if (payload?.email) {
-          const email = payload.email.trim().toLowerCase();
+        // Apple sends email in payload.email; name only on first auth
+        // Google sends email, name, picture in payload
+        const email = (payload?.email || '').trim().toLowerCase();
+        if (email) {
           const existing = roleRegistry.get(email);
+          const provider = saved.provider || 'sso';
 
           if (existing) {
-            // Returning user — restore their saved role and tier (never auto-escalate)
             selectRole(existing.role, existing.name, email, existing.tier);
             setTier(existing.tier);
             toast.success(`Welcome back, ${existing.name}!`);
           } else {
-            // New SSO user — default to individual role + individual tier
-            const name = payload.name || email.split('@')[0];
+            // Apple: name might be in payload or in the user object from form_post
+            // Google: name is in payload.name
+            const name = payload.name || payload.given_name || email.split('@')[0];
             selectRole('individual', name, email, 'individual');
             setTier('individual');
-            toast.success(`Welcome, ${name}!`);
+            toast.success(`Welcome, ${name}! (via ${provider})`);
           }
         } else {
-          toast.error('Could not read profile from Google — please try again');
+          toast.error('Could not read profile from SSO provider — please try again');
         }
         return;
       }
