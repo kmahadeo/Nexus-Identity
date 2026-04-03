@@ -8,6 +8,26 @@
 
 import { getSupabase, isSupabaseConfigured } from './supabase';
 
+/** Ensure a principal_id exists in profiles before referencing it as a FK */
+async function ensurePrincipal(client: any, principalId: string, fallbackEmail?: string): Promise<void> {
+  if (!principalId || principalId === 'unknown' || principalId === 'system') return;
+  const { data } = await client.from('profiles')
+    .select('principal_id').eq('principal_id', principalId).maybeSingle();
+  if (!data) {
+    const email = fallbackEmail || `${principalId}@nexus.local`;
+    // Check if email already exists (avoid duplicate email constraint)
+    const { data: byEmail } = await client.from('profiles')
+      .select('principal_id').eq('email', email.toLowerCase()).maybeSingle();
+    if (!byEmail) {
+      await client.from('profiles').insert({
+        principal_id: principalId, email: email.toLowerCase(),
+        name: email.split('@')[0], role: 'individual', tier: 'individual',
+        is_active: true, mfa_enabled: false, passkeys_count: 0, vault_count: 0,
+      });
+    }
+  }
+}
+
 export async function migrateAllToSupabase(): Promise<{ migrated: string[]; errors: string[] }> {
   const migrated: string[] = [];
   const errors: string[] = [];
@@ -23,6 +43,9 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
   if (!session?.principalId) return { migrated, errors };
 
   const pid = session.principalId;
+
+  // Ensure current user's profile exists first
+  await ensurePrincipal(client, pid, session.email);
 
   // ── 1. Profile ──
   try {
@@ -106,12 +129,15 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
       const key = localStorage.key(i);
       if (!key?.startsWith('nexus-passkeys-')) continue;
       const ownerId = key.replace('nexus-passkeys-', '');
+      await ensurePrincipal(client, ownerId); // FK constraint
       const passkeys = (() => { try { return JSON.parse(localStorage.getItem(key) ?? '[]'); } catch { return []; } })();
 
       for (const pk of passkeys) {
         if (existingPkIds.has(pk.id)) continue;
+        const pkOwnerId = pk.ownerId || ownerId;
+        await ensurePrincipal(client, pkOwnerId);
         const { error } = await client.from('passkeys').insert({
-          id: pk.id, owner_id: pk.ownerId || ownerId, raw_id: pk.rawId || pk.id,
+          id: pk.id, owner_id: pkOwnerId, raw_id: pk.rawId || pk.id,
           type: pk.type || 'platform', name: pk.name || 'Passkey',
           user_handle: pk.userHandle || '', aaguid: pk.aaguid || null,
           sign_count: pk.signCount || 0, transports: pk.transports || [],
@@ -131,22 +157,34 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
     const existingTeamIds = new Set((existingTeams || []).map((t: any) => t.id));
 
     let teamCount = 0;
+    let memberCount = 0;
     for (const team of teams) {
-      if (existingTeamIds.has(team.id)) continue;
-      const { error } = await client.from('teams').insert({
-        id: team.id, name: team.name, created_by: pid,
-      });
-      if (error) { errors.push(`team ${team.name}: ${error.message}`); continue; }
-      teamCount++;
+      if (!existingTeamIds.has(team.id)) {
+        await ensurePrincipal(client, pid, session.email);
+        const { error } = await client.from('teams').insert({
+          id: team.id, name: team.name, created_by: pid,
+        });
+        if (error) { errors.push(`team ${team.name}: ${error.message}`); continue; }
+        teamCount++;
+      }
+
+      // Always sync members (even for existing teams)
+      const { data: existingMembers } = await client.from('team_members')
+        .select('principal_id').eq('team_id', team.id);
+      const existingMemberPids = new Set((existingMembers || []).map((m: any) => m.principal_id));
 
       for (const member of (team.members || [])) {
+        const mPid = member.principalId || member.principal || 'unknown';
+        if (existingMemberPids.has(mPid)) continue;
         await client.from('team_members').insert({
-          team_id: team.id, principal_id: member.principalId || member.principal || 'unknown',
+          team_id: team.id, principal_id: mPid,
           name: member.name || '', email: member.email || '', role: member.role || 'view',
         });
+        memberCount++;
       }
     }
     if (teamCount > 0) migrated.push(`teams: ${teamCount}`);
+    if (memberCount > 0) migrated.push(`members: ${memberCount}`);
   } catch (e) { errors.push(`teams: ${e}`); }
 
   // ── 5. Policies ──
@@ -177,6 +215,7 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
       const key = localStorage.key(i);
       if (!key?.startsWith('nexus-totp-credentials-')) continue;
       const ownerId = key.replace('nexus-totp-credentials-', '');
+      await ensurePrincipal(client, ownerId); // FK constraint
       const creds = (() => { try { return JSON.parse(localStorage.getItem(key) ?? '[]'); } catch { return []; } })();
 
       const { data: existing } = await client.from('totp_credentials')
@@ -228,6 +267,7 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
     for (const r of requests) {
       const dedupKey = `${r.requesterPrincipalId}:${r.subject}`;
       if (existingHelpKeys.has(dedupKey)) continue;
+      await ensurePrincipal(client, r.requesterPrincipalId, r.requesterEmail);
       await client.from('help_requests').insert({
         subject: r.subject, message: r.message, category: r.category || 'other',
         priority: r.priority || 'medium', status: r.status || 'open',
