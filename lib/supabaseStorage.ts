@@ -7,7 +7,8 @@
  */
 
 import { getSupabase, isSupabaseConfigured } from './supabase';
-import { logWarn } from './logger';
+// Logger import removed — using console.error directly for Supabase errors
+// These MUST be visible in production to debug sync failures
 
 /* ── Helper ─────────────────────────────────────────────────────────────── */
 
@@ -63,17 +64,14 @@ export interface ProfileRecord {
 
 export const profilesDB = {
   async upsert(profile: ProfileRecord): Promise<void> {
+    console.error('[SB-DEBUG] profilesDB.upsert called for:', profile.email, '| configured:', isSupabaseConfigured(), '| url:', !!import.meta.env.VITE_SUPABASE_URL, '| key:', !!import.meta.env.VITE_SUPABASE_ANON_KEY);
     const client = sb();
     if (!client) {
-      console.error('[Supabase] NO CLIENT — isConfigured:', isSupabaseConfigured(), 'url:', import.meta.env.VITE_SUPABASE_URL ? 'set' : 'MISSING', 'key:', import.meta.env.VITE_SUPABASE_ANON_KEY ? 'set' : 'MISSING');
+      console.error('[SB-DEBUG] NO CLIENT RETURNED');
       return;
     }
+    console.error('[SB-DEBUG] Client obtained, proceeding with upsert');
     try {
-      // Check if profile exists first
-      const { data: existing, error: selectErr } = await client.from('profiles')
-        .select('principal_id').eq('principal_id', profile.principal_id).maybeSingle();
-      if (selectErr) console.error('[Supabase] profile select failed:', selectErr.message);
-
       const record = {
         ...profile,
         alias: profile.alias || profile.email.split('@')[0],
@@ -82,15 +80,33 @@ export const profilesDB = {
         last_login_at: new Date().toISOString(),
       };
 
-      if (existing) {
+      // Check by principal_id first
+      const { data: byPid } = await client.from('profiles')
+        .select('principal_id').eq('principal_id', profile.principal_id).maybeSingle();
+
+      if (byPid) {
+        // Existing profile with this principal_id — update it
         const { error } = await client.from('profiles')
           .update(record).eq('principal_id', profile.principal_id);
-        if (error) console.error('[Supabase] profile UPDATE failed:', error.code, error.message, error.details);
+        if (error) console.error('[Supabase] profile UPDATE (by pid) failed:', error.code, error.message);
         else console.log('[Supabase] profile updated:', profile.email);
       } else {
-        const { error } = await client.from('profiles').insert(record);
-        if (error) console.error('[Supabase] profile INSERT failed:', error.code, error.message, error.details);
-        else console.log('[Supabase] profile created:', profile.email);
+        // Check by email (might exist with a different principal_id from a previous login method)
+        const { data: byEmail } = await client.from('profiles')
+          .select('principal_id').eq('email', profile.email.toLowerCase()).maybeSingle();
+
+        if (byEmail) {
+          // Email exists with different principal_id — update the row to use the new principal_id
+          const { error } = await client.from('profiles')
+            .update(record).eq('email', profile.email.toLowerCase());
+          if (error) console.error('[Supabase] profile UPDATE (by email) failed:', error.code, error.message);
+          else console.log('[Supabase] profile updated (email match):', profile.email);
+        } else {
+          // Truly new user — insert
+          const { error } = await client.from('profiles').insert(record);
+          if (error) console.error('[Supabase] profile INSERT failed:', error.code, error.message);
+          else console.log('[Supabase] profile created:', profile.email);
+        }
       }
     } catch (e) {
       console.error('[Supabase] profile upsert exception:', e);
@@ -110,7 +126,7 @@ export const profilesDB = {
     if (client) {
       const { data, error } = await client.from('profiles').select('*').order('last_login_at', { ascending: false });
       if (!error && data) return data as ProfileRecord[];
-      logWarn('[Supabase] profiles getAll failed:', error?.message);
+      console.error('[Supabase] profiles getAll failed:', error?.message);
     }
     // Fallback to localStorage
     try { return JSON.parse(localStorage.getItem('nexus-user-registry') ?? '[]'); } catch { return []; }
@@ -166,7 +182,7 @@ export const vaultDB = {
       const { data, error } = await client.from('vault_entries')
         .select('*').eq('owner_id', ownerId).order('created_at', { ascending: false });
       if (!error && data) return data as VaultRecord[];
-      logWarn('[Supabase] vault getAll failed:', error?.message);
+      console.error('[Supabase] vault getAll failed:', error?.message);
     }
     return [];
   },
@@ -218,7 +234,7 @@ export const vaultDB = {
     const client = sb();
     if (client && entry.id) {
       const { error } = await client.from('vault_entries').update(entry).eq('id', entry.id);
-      if (error) logWarn('[Supabase] vault update failed:', error.message);
+      if (error) console.error('[Supabase] vault update failed:', error.message);
     }
   },
 };
@@ -242,7 +258,7 @@ export const auditDB = {
     const client = sb();
     if (client) {
       const { error } = await client.from('audit_log').insert(event);
-      if (error) logWarn('[Supabase] audit log failed:', error.message);
+      if (error) console.error('[Supabase] audit log failed:', error.message);
     }
   },
 
