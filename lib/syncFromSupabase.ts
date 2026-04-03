@@ -193,6 +193,36 @@ export async function syncFromSupabase(principalId: string, email: string): Prom
     }
   } catch {}
 
+  // ── Service Accounts ──
+  try {
+    const { data } = await client.from('service_accounts').select('*');
+    if (data && data.length > 0) {
+      const saKey = 'nexus-service-accounts';
+      const existing = (() => { try { return JSON.parse(localStorage.getItem(saKey) ?? '[]'); } catch { return []; } })();
+      if (existing.length === 0) {
+        // Also fetch keys for each account
+        const { data: allKeys } = await client.from('service_account_keys').select('*');
+        const accounts = data.map((d: any) => ({
+          id: d.id, name: d.name, type: d.type, description: d.description || '',
+          ownerId: d.owner_id, ownerEmail: d.owner_email || '',
+          status: d.status, permissions: d.permissions || [], scopes: d.scopes || [],
+          rotationPolicy: d.rotation_policy || 90,
+          lastActivity: d.last_activity ? new Date(d.last_activity).getTime() : null,
+          createdAt: new Date(d.created_at).getTime(),
+          expiresAt: d.expires_at ? new Date(d.expires_at).getTime() : null,
+          apiKeys: (allKeys || []).filter((k: any) => k.account_id === d.id).map((k: any) => ({
+            id: k.id, keyPrefix: k.key_prefix, hashedKey: k.hashed_key,
+            name: k.name, createdAt: new Date(k.created_at).getTime(),
+            lastUsedAt: k.last_used_at ? new Date(k.last_used_at).getTime() : null,
+            expiresAt: k.expires_at ? new Date(k.expires_at).getTime() : null,
+          })),
+        }));
+        localStorage.setItem(saKey, JSON.stringify(accounts));
+        restored.push(`service_accounts: ${accounts.length}`);
+      }
+    }
+  } catch {}
+
   if (restored.length > 0) {
     console.log('[Supabase] Restored from cloud:', restored.join(', '));
   }

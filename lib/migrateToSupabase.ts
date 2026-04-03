@@ -337,5 +337,38 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
     if (connCount > 0) migrated.push(`directories: ${connCount}`);
   } catch (e) { errors.push(`directories: ${e}`); }
 
+  // ── 11. Service Accounts ──
+  try {
+    const accounts = (() => { try { return JSON.parse(localStorage.getItem('nexus-service-accounts') ?? '[]'); } catch { return []; } })();
+    const { data: existingSA } = await client.from('service_accounts').select('id');
+    const existingSAIds = new Set((existingSA || []).map((s: any) => s.id));
+
+    let saCount = 0;
+    for (const sa of accounts) {
+      if (existingSAIds.has(sa.id)) continue;
+      const resolvedOwner = await resolveOrCreatePrincipal(client, sa.ownerId, sa.ownerEmail);
+      await client.from('service_accounts').insert({
+        id: sa.id, name: sa.name, type: sa.type, description: sa.description || '',
+        owner_id: resolvedOwner, owner_email: sa.ownerEmail || '',
+        status: sa.status || 'active', permissions: sa.permissions || [],
+        scopes: sa.scopes || [], rotation_policy: sa.rotationPolicy || 90,
+        last_activity: sa.lastActivity ? new Date(sa.lastActivity).toISOString() : null,
+        expires_at: sa.expiresAt ? new Date(sa.expiresAt).toISOString() : null,
+      });
+      saCount++;
+
+      // Sync API keys (hashes only)
+      for (const key of (sa.apiKeys || [])) {
+        await client.from('service_account_keys').upsert({
+          id: key.id, account_id: sa.id, name: key.name,
+          key_prefix: key.keyPrefix, hashed_key: key.hashedKey,
+          expires_at: key.expiresAt ? new Date(key.expiresAt).toISOString() : null,
+          last_used_at: key.lastUsedAt ? new Date(key.lastUsedAt).toISOString() : null,
+        }, { onConflict: 'id' });
+      }
+    }
+    if (saCount > 0) migrated.push(`service_accounts: ${saCount}`);
+  } catch (e) { errors.push(`service_accounts: ${e}`); }
+
   return { migrated, errors };
 }
