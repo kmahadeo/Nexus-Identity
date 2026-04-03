@@ -65,16 +65,16 @@ export function InternetIdentityProvider({ children }: { children: ReactNode }) 
       principal_id: principalId, email, name, role, tier,
       is_active: true, mfa_enabled: false, passkeys_count: 0, vault_count: 0,
     }).then(() => {
-      // Session and audit can fire after profile exists
+      console.log('[Supabase] profile synced, now adding session + audit');
       sessionsDB.add({
         principal_id: principalId, name, email,
         device: navigator.userAgent, ip_address: '127.0.0.1',
-      }).catch(() => {});
+      }).catch((e) => console.error('[Supabase] session add failed:', e));
       auditDB.log({
         action: 'auth.login', actor_id: principalId, actor_email: email,
         actor_role: role, details: `Logged in as ${role} (${tier})`, result: 'success',
-      }).catch(() => {});
-    }).catch(() => {});
+      }).catch((e) => console.error('[Supabase] audit log failed:', e));
+    }).catch((e) => console.error('[Supabase] profile upsert failed:', e));
 
     // Mark vault as verified for 30 minutes — login IS the verification
     markVaultVerified();

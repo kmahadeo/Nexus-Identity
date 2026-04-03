@@ -64,10 +64,15 @@ export interface ProfileRecord {
 export const profilesDB = {
   async upsert(profile: ProfileRecord): Promise<void> {
     const client = sb();
-    if (client) {
+    if (!client) {
+      console.error('[Supabase] NO CLIENT — isConfigured:', isSupabaseConfigured(), 'url:', import.meta.env.VITE_SUPABASE_URL ? 'set' : 'MISSING', 'key:', import.meta.env.VITE_SUPABASE_ANON_KEY ? 'set' : 'MISSING');
+      return;
+    }
+    try {
       // Check if profile exists first
-      const { data: existing } = await client.from('profiles')
+      const { data: existing, error: selectErr } = await client.from('profiles')
         .select('principal_id').eq('principal_id', profile.principal_id).maybeSingle();
+      if (selectErr) console.error('[Supabase] profile select failed:', selectErr.message);
 
       const record = {
         ...profile,
@@ -78,15 +83,17 @@ export const profilesDB = {
       };
 
       if (existing) {
-        // Update existing profile
         const { error } = await client.from('profiles')
           .update(record).eq('principal_id', profile.principal_id);
-        if (error) logWarn('[Supabase] profiles update failed:', error.message);
+        if (error) console.error('[Supabase] profile UPDATE failed:', error.code, error.message, error.details);
+        else console.log('[Supabase] profile updated:', profile.email);
       } else {
-        // Insert new profile
         const { error } = await client.from('profiles').insert(record);
-        if (error) logWarn('[Supabase] profiles insert failed:', error.message);
+        if (error) console.error('[Supabase] profile INSERT failed:', error.code, error.message, error.details);
+        else console.log('[Supabase] profile created:', profile.email);
       }
+    } catch (e) {
+      console.error('[Supabase] profile upsert exception:', e);
     }
     // Always keep localStorage in sync as fallback
     try {
