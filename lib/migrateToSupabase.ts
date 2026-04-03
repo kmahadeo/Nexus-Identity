@@ -8,24 +8,38 @@
 
 import { getSupabase, isSupabaseConfigured } from './supabase';
 
-/** Ensure a principal_id exists in profiles before referencing it as a FK */
-async function ensurePrincipal(client: any, principalId: string, fallbackEmail?: string): Promise<void> {
-  if (!principalId || principalId === 'unknown' || principalId === 'system') return;
-  const { data } = await client.from('profiles')
+/**
+ * Ensure a principal_id exists in profiles. Returns the ACTUAL pid in Supabase
+ * (which might differ from the one passed in if the email is already registered
+ * under a different pid from a different login method).
+ */
+async function resolveOrCreatePrincipal(client: any, principalId: string, fallbackEmail?: string): Promise<string> {
+  if (!principalId || principalId === 'unknown' || principalId === 'system') return principalId;
+
+  // Check if this exact pid exists
+  const { data: byPid } = await client.from('profiles')
     .select('principal_id').eq('principal_id', principalId).maybeSingle();
-  if (!data) {
-    const email = fallbackEmail || `${principalId}@nexus.local`;
-    // Check if email already exists (avoid duplicate email constraint)
+  if (byPid) return principalId;
+
+  // Check if the email exists under a different pid
+  if (fallbackEmail) {
     const { data: byEmail } = await client.from('profiles')
-      .select('principal_id').eq('email', email.toLowerCase()).maybeSingle();
-    if (!byEmail) {
-      await client.from('profiles').insert({
-        principal_id: principalId, email: email.toLowerCase(),
-        name: email.split('@')[0], role: 'individual', tier: 'individual',
-        is_active: true, mfa_enabled: false, passkeys_count: 0, vault_count: 0,
-      });
-    }
+      .select('principal_id').eq('email', fallbackEmail.toLowerCase()).maybeSingle();
+    if (byEmail) return byEmail.principal_id; // Use the existing pid
   }
+
+  // Neither pid nor email exists — create new profile
+  const email = fallbackEmail || `${principalId}@nexus.local`;
+  const { data: emailCheck } = await client.from('profiles')
+    .select('principal_id').eq('email', email.toLowerCase()).maybeSingle();
+  if (emailCheck) return emailCheck.principal_id;
+
+  await client.from('profiles').insert({
+    principal_id: principalId, email: email.toLowerCase(),
+    name: email.split('@')[0], role: 'individual', tier: 'individual',
+    is_active: true, mfa_enabled: false, passkeys_count: 0, vault_count: 0,
+  });
+  return principalId;
 }
 
 export async function migrateAllToSupabase(): Promise<{ migrated: string[]; errors: string[] }> {
@@ -42,10 +56,10 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
   })();
   if (!session?.principalId) return { migrated, errors };
 
-  const pid = session.principalId;
+  const localPid = session.principalId;
 
-  // Ensure current user's profile exists first
-  await ensurePrincipal(client, pid, session.email);
+  // Resolve the actual pid in Supabase (might differ if user logged in with different method before)
+  const pid = await resolveOrCreatePrincipal(client, localPid, session.email);
 
   // ── 1. Profile ──
   try {
@@ -98,7 +112,9 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (!key?.startsWith('nexus-vault')) continue;
-      const ownerId = key === 'nexus-vault' ? pid : key.replace('nexus-vault-', '');
+      const localOwnerId = key === 'nexus-vault' ? localPid : key.replace('nexus-vault-', '');
+      // Resolve to actual Supabase pid (might differ from local)
+      const ownerId = await resolveOrCreatePrincipal(client, localOwnerId, session.email);
       const entries = (() => { try { return JSON.parse(localStorage.getItem(key) ?? '[]'); } catch { return []; } })();
 
       for (const entry of entries) {
@@ -128,16 +144,14 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (!key?.startsWith('nexus-passkeys-')) continue;
-      const ownerId = key.replace('nexus-passkeys-', '');
-      await ensurePrincipal(client, ownerId); // FK constraint
+      const localOwnerId = key.replace('nexus-passkeys-', '');
+      const resolvedOwnerId = await resolveOrCreatePrincipal(client, localOwnerId, session.email);
       const passkeys = (() => { try { return JSON.parse(localStorage.getItem(key) ?? '[]'); } catch { return []; } })();
 
       for (const pk of passkeys) {
         if (existingPkIds.has(pk.id)) continue;
-        const pkOwnerId = pk.ownerId || ownerId;
-        await ensurePrincipal(client, pkOwnerId);
         const { error } = await client.from('passkeys').insert({
-          id: pk.id, owner_id: pkOwnerId, raw_id: pk.rawId || pk.id,
+          id: pk.id, owner_id: resolvedOwnerId, raw_id: pk.rawId || pk.id,
           type: pk.type || 'platform', name: pk.name || 'Passkey',
           user_handle: pk.userHandle || '', aaguid: pk.aaguid || null,
           sign_count: pk.signCount || 0, transports: pk.transports || [],
@@ -160,7 +174,7 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
     let memberCount = 0;
     for (const team of teams) {
       if (!existingTeamIds.has(team.id)) {
-        await ensurePrincipal(client, pid, session.email);
+        await resolveOrCreatePrincipal(client, pid, session.email);
         const { error } = await client.from('teams').insert({
           id: team.id, name: team.name, created_by: pid,
         });
@@ -214,18 +228,18 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (!key?.startsWith('nexus-totp-credentials-')) continue;
-      const ownerId = key.replace('nexus-totp-credentials-', '');
-      await ensurePrincipal(client, ownerId); // FK constraint
+      const localOwnerId = key.replace('nexus-totp-credentials-', '');
+      const resolvedOwnerId = await resolveOrCreatePrincipal(client, localOwnerId, session.email);
       const creds = (() => { try { return JSON.parse(localStorage.getItem(key) ?? '[]'); } catch { return []; } })();
 
       const { data: existing } = await client.from('totp_credentials')
-        .select('secret').eq('owner_id', ownerId);
+        .select('secret').eq('owner_id', resolvedOwnerId);
       const existingSecrets = new Set((existing || []).map((c: any) => c.secret));
 
       for (const cred of creds) {
         if (existingSecrets.has(cred.secret)) continue;
         await client.from('totp_credentials').insert({
-          owner_id: ownerId, label: cred.label || 'Authenticator',
+          owner_id: resolvedOwnerId, label: cred.label || 'Authenticator',
           app: cred.app || 'google', secret: cred.secret, verified: cred.verified ?? false,
         });
         totpCount++;
@@ -265,13 +279,13 @@ export async function migrateAllToSupabase(): Promise<{ migrated: string[]; erro
 
     let helpCount = 0;
     for (const r of requests) {
-      const dedupKey = `${r.requesterPrincipalId}:${r.subject}`;
+      const resolvedReqPid = await resolveOrCreatePrincipal(client, r.requesterPrincipalId, r.requesterEmail);
+      const dedupKey = `${resolvedReqPid}:${r.subject}`;
       if (existingHelpKeys.has(dedupKey)) continue;
-      await ensurePrincipal(client, r.requesterPrincipalId, r.requesterEmail);
       await client.from('help_requests').insert({
         subject: r.subject, message: r.message, category: r.category || 'other',
         priority: r.priority || 'medium', status: r.status || 'open',
-        requester_id: r.requesterPrincipalId, requester_email: r.requesterEmail || '',
+        requester_id: resolvedReqPid, requester_email: r.requesterEmail || '',
         requester_name: r.requesterName || '', admin_notes: r.adminNotes || null,
       });
       helpCount++;
