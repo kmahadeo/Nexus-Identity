@@ -265,7 +265,14 @@ export const auditDB = {
   async log(event: AuditRecord): Promise<void> {
     const client = sb();
     if (client) {
-      const { error } = await client.from('audit_log').insert(event);
+      // audit_log.actor_id has no FK constraint — but resolve for consistency
+      let actorId = event.actor_id;
+      if (event.actor_email) {
+        const { data: byEmail } = await client.from('profiles')
+          .select('principal_id').eq('email', event.actor_email.toLowerCase()).maybeSingle();
+        if (byEmail) actorId = byEmail.principal_id;
+      }
+      const { error } = await client.from('audit_log').insert({ ...event, actor_id: actorId });
       if (error) console.error('[Supabase] audit log failed:', error.message);
     }
   },
@@ -290,8 +297,15 @@ export const sessionsDB = {
   }): Promise<void> {
     const client = sb();
     if (client) {
-      await ensureProfile();
-      const { error } = await client.from('active_sessions').insert(session);
+      // Resolve the actual pid in Supabase (might differ from local)
+      let pid = session.principal_id;
+      if (session.email) {
+        const { data: byEmail } = await client.from('profiles')
+          .select('principal_id').eq('email', session.email.toLowerCase()).maybeSingle();
+        if (byEmail) pid = byEmail.principal_id;
+      }
+      if (!pid) { await ensureProfile(); pid = session.principal_id; }
+      const { error } = await client.from('active_sessions').insert({ ...session, principal_id: pid });
       if (error) console.error('[SB] session add:', error.code, error.message);
     }
   },
