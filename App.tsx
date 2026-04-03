@@ -7,6 +7,7 @@ import LandingPage from './LandingPage';
 import MainApp from './MainApp';
 import { callbackStorage, pkceStorage } from './lib/oauth';
 import { roleRegistry } from './lib/storage';
+import { getSupabase, isSupabaseConfigured } from './lib/supabase';
 import { toast } from 'sonner';
 
 /** Decode a JWT payload (no signature verification — just parse). */
@@ -27,6 +28,9 @@ export default function App() {
   //   2. Auth code flow: ?code=...&state=... (Okta, Entra, Apple)
   useEffect(() => {
     if (oauthHandled.current) return;
+
+    // Wrap in async IIFE for Supabase lookups
+    (async () => {
 
     // Check URL fragment first (implicit flow — Google)
     const hash = window.location.hash.substring(1);
@@ -55,20 +59,32 @@ export default function App() {
         // Google sends email, name, picture in payload
         const email = (payload?.email || '').trim().toLowerCase();
         if (email) {
-          const existing = roleRegistry.get(email);
-          const provider = saved.provider || 'sso';
+          // Check localStorage first, then Supabase for existing user
+          let existing = roleRegistry.get(email);
+
+          // If not in localStorage, check Supabase for existing user/role
+          if (!existing && isSupabaseConfigured()) {
+            const client = getSupabase();
+            if (client) {
+              const { data } = await client.from('profiles')
+                .select('principal_id, name, role, tier')
+                .eq('email', email).maybeSingle();
+              if (data) {
+                existing = { principalId: data.principal_id, name: data.name, role: data.role as any, tier: data.tier as any };
+                roleRegistry.save({ email, name: data.name, role: data.role as any, tier: data.tier as any, principalId: data.principal_id });
+              }
+            }
+          }
 
           if (existing) {
             selectRole(existing.role, existing.name, email, existing.tier);
             setTier(existing.tier);
             toast.success(`Welcome back, ${existing.name}!`);
           } else {
-            // Apple: name might be in payload or in the user object from form_post
-            // Google: name is in payload.name
             const name = payload.name || payload.given_name || email.split('@')[0];
             selectRole('individual', name, email, 'individual');
             setTier('individual');
-            toast.success(`Welcome, ${name}! (via ${provider})`);
+            toast.success(`Welcome, ${name}!`);
           }
         } else {
           toast.error('Could not read profile from SSO provider — please try again');
@@ -89,6 +105,8 @@ export default function App() {
       toast.info('Authorization code received — backend token exchange needed');
       pkceStorage.clear();
     }
+
+    })(); // end async IIFE
   }, [selectRole, loginWithEmail, setTier]);
 
   // Only considered authenticated once role selection is complete
