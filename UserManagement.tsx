@@ -442,6 +442,20 @@ export default function UserManagement() {
                           <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Reactivate
                         </Button>
                       )}
+
+                      <Button
+                        variant="outline" size="sm"
+                        className="rounded-full text-xs h-8 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/10"
+                        onClick={() => {
+                          const session = sessionStorage_.get();
+                          sendInviteEmail(user.email, session?.name || 'Admin', user.role).then(sent => {
+                            if (sent) toast.success(`Invite resent to ${user.email}`);
+                            else toast.error(`Failed to send invite — check email config in Settings`);
+                          });
+                        }}
+                      >
+                        <Mail className="h-3.5 w-3.5 mr-1" /> Resend Invite
+                      </Button>
                     </div>
                   </div>
                 )}

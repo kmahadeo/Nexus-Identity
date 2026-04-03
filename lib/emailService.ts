@@ -71,7 +71,8 @@ export async function sendEmail(to: string, subject: string, body: string, html?
       });
 
       if (res.ok) {
-        console.log('[Email/Brevo] Sent to', to);
+        const result = await res.json().catch(() => ({}));
+        console.log('[Email/Brevo] Sent to', to, 'messageId:', result.messageId);
         return true;
       } else {
         const err = await res.json().catch(() => ({}));
