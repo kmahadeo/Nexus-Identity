@@ -4,10 +4,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Brain, Shield, AlertTriangle, TrendingUp, Users, Activity, Zap, CheckCircle2, Target, FileText, Database, ExternalLink, Clock, XCircle } from 'lucide-react';
+import { Brain, Shield, AlertTriangle, TrendingUp, Users, Activity, Zap, CheckCircle2, Target, FileText, Database, ExternalLink, Clock, XCircle, Bot } from 'lucide-react';
 import { useGetVaultEntries, useGetTeams, useGetRecommendations, useGetPasskeyCount } from '../hooks/useQueries';
 import { computeSecurityScore, type SecurityState } from '../lib/securityEngine';
 import { getAuditLog, type AuditEvent } from '../../../lib/auditLog';
+import AgentIdentity from './AgentIdentity';
 
 export default function AdminIntelligence() {
   const { data: vaultEntries = [] } = useGetVaultEntries();
@@ -307,6 +308,24 @@ export default function AdminIntelligence() {
               priority="low"
             />
           </div>
+        </CardContent>
+      </Card>
+
+      {/* AI Agent Identity */}
+      <Card className="border-border/40 glass-strong shadow-depth-md">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Bot className="h-5 w-5 text-primary" />
+                AI Agent Identity
+              </CardTitle>
+              <CardDescription>Manage AI agent identities, scoped tokens, and human-in-the-loop approvals</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <AgentIdentity />
         </CardContent>
       </Card>
 

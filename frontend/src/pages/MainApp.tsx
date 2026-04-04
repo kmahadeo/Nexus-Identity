@@ -21,7 +21,8 @@ import {
   Code,
   Brain,
   Network,
-  Zap
+  Zap,
+  Bot
 } from 'lucide-react';
 import { toast } from 'sonner';
 import NexusLogo from '../components/NexusLogo';
@@ -38,8 +39,9 @@ import NotificationCenter from '../components/NotificationCenter';
 import DeveloperPortal from '../components/DeveloperPortal';
 import AdminIntelligence from '../components/AdminIntelligence';
 import FederatedIdentity from '../components/FederatedIdentity';
+import AgentIdentity from '../components/AgentIdentity';
 
-type NavItem = 'dashboard' | 'passkeys' | 'vault' | 'biometric' | 'threat' | 'team' | 'integrations' | 'settings' | 'developer' | 'admin' | 'federated';
+type NavItem = 'dashboard' | 'passkeys' | 'vault' | 'biometric' | 'threat' | 'team' | 'integrations' | 'settings' | 'developer' | 'admin' | 'federated' | 'agents';
 
 export default function MainApp() {
   const { clear } = useInternetIdentity();
@@ -86,6 +88,7 @@ export default function MainApp() {
     ...(isEnterprise ? [{ id: 'federated' as NavItem, label: 'Nexus Fabric', icon: Network }] : []),
     ...(isSmbOrAbove ? [{ id: 'developer' as NavItem, label: 'Developer SDK', icon: Code }] : []),
     ...(isEnterprise && isAdmin ? [{ id: 'admin' as NavItem, label: 'Admin Intelligence', icon: Brain }] : []),
+    ...(isEnterprise && isAdmin ? [{ id: 'agents' as NavItem, label: 'AI Agents', icon: Bot }] : []),
     { id: 'settings' as NavItem, label: 'Settings', icon: Settings },
   ];
 
@@ -206,6 +209,7 @@ export default function MainApp() {
         {activeView === 'federated' && <FederatedIdentity />}
         {activeView === 'developer' && <DeveloperPortal />}
         {activeView === 'admin' && isAdmin && <AdminIntelligence />}
+        {activeView === 'agents' && isAdmin && <AgentIdentity />}
         {activeView === 'settings' && <SettingsPanel />}
       </main>
 

@@ -14,7 +14,7 @@ import {
   Settings, Bell, Shield, Smartphone, Key, Plug, Sparkles,
   CheckCircle2, Trash2, Eye, EyeOff, Copy, ExternalLink,
   RefreshCw, AlertCircle, Lock, User, Save, HelpCircle,
-  Globe, CreditCard, Camera, Upload, Link2, X,
+  Globe, CreditCard, Camera, Upload, Link2, X, Zap,
 } from 'lucide-react';
 import MFASetup from './MFASetup';
 import { resetOnboarding } from './OnboardingFlow';
@@ -28,6 +28,12 @@ import {
   getAppleConfig, setAppleConfig,
   getStripeKey, setStripeKey,
 } from './lib/ssoConfig';
+import {
+  getSAMLConfigs, saveSAMLConfig, deleteSAMLConfig,
+  createDefaultConfig, generateSPMetadataXML, downloadSPMetadata,
+  validateSAMLConfig, initiateSAMLLogin,
+  type SAMLConfig, type SAMLNameIdFormat,
+} from './lib/saml';
 
 /* ── Avatar localStorage helpers ──────────────────────────────────────── */
 const AVATAR_KEY = 'nexus-avatar';
@@ -117,6 +123,63 @@ export default function SettingsPanel() {
   const [googleClientId, setGoogleClientIdState] = useState(() => getGoogleConfig());
   const [appleClientId, setAppleClientIdState] = useState(() => getAppleConfig());
   const [stripeKeyDraft, setStripeKeyDraft] = useState(() => getStripeKey());
+
+  // SAML SSO state
+  const [samlConfigs, setSamlConfigs] = useState<SAMLConfig[]>(() => getSAMLConfigs());
+  const [editingSaml, setEditingSaml] = useState<SAMLConfig | null>(null);
+  const [samlErrors, setSamlErrors] = useState<string[]>([]);
+  const [samlTestLoading, setSamlTestLoading] = useState<string | null>(null);
+
+  const openSamlEditor = (config?: SAMLConfig) => {
+    setEditingSaml(config ?? createDefaultConfig());
+    setSamlErrors([]);
+  };
+
+  const closeSamlEditor = () => {
+    setEditingSaml(null);
+    setSamlErrors([]);
+  };
+
+  const handleSaveSaml = () => {
+    if (!editingSaml) return;
+    const errors = validateSAMLConfig(editingSaml);
+    if (errors.length > 0) {
+      setSamlErrors(errors);
+      return;
+    }
+    saveSAMLConfig(editingSaml);
+    setSamlConfigs(getSAMLConfigs());
+    closeSamlEditor();
+    toast.success(`SAML connection "${editingSaml.name}" saved`);
+  };
+
+  const handleDeleteSaml = (id: string, name: string) => {
+    deleteSAMLConfig(id);
+    setSamlConfigs(getSAMLConfigs());
+    toast.success(`SAML connection "${name}" deleted`);
+  };
+
+  const handleTestSaml = async (configId: string) => {
+    setSamlTestLoading(configId);
+    try {
+      await initiateSAMLLogin(configId);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      toast.error(`SAML test failed: ${msg}`);
+      setSamlTestLoading(null);
+    }
+  };
+
+  const handleDownloadMetadata = (config: SAMLConfig) => {
+    downloadSPMetadata(config);
+    toast.success('SP metadata XML downloaded');
+  };
+
+  const copyMetadataXml = (config: SAMLConfig) => {
+    const xml = generateSPMetadataXML(config);
+    navigator.clipboard.writeText(xml);
+    toast.success('SP metadata XML copied to clipboard');
+  };
 
   const saveGoogleConfig = () => {
     setGoogleConfig(googleClientId);
@@ -919,6 +982,202 @@ export default function SettingsPanel() {
                   <Button onClick={saveStripeConfig} size="sm" className="rounded-full btn-press shrink-0">
                     <Save className="h-3.5 w-3.5 mr-1.5" />Save
                   </Button>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* ── SAML 2.0 SSO ── */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">SAML 2.0 SSO</h3>
+                  <Button onClick={() => openSamlEditor()} size="sm" className="rounded-full btn-press text-xs">
+                    <Plug className="h-3.5 w-3.5 mr-1.5" />Add IdP Connection
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Connect enterprise Identity Providers (Okta, Microsoft Entra ID, Google Workspace, etc.) via SAML 2.0. Users can then sign in with "Login with SSO".
+                </p>
+
+                {/* SAML Editor Modal */}
+                {editingSaml && (
+                  <div className="p-5 rounded-xl border border-primary/30 glass-strong shadow-depth-md mb-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold text-sm">{editingSaml.createdAt === editingSaml.updatedAt ? 'New' : 'Edit'} SAML IdP Connection</h4>
+                      <Button variant="ghost" size="sm" onClick={closeSamlEditor} className="rounded-full btn-press h-7 w-7 p-0">
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    {samlErrors.length > 0 && (
+                      <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/30 space-y-1">
+                        {samlErrors.map((err, i) => (
+                          <p key={i} className="text-xs text-destructive flex items-center gap-1.5">
+                            <AlertCircle className="h-3 w-3 shrink-0" />{err}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Connection Name *</Label>
+                        <Input
+                          placeholder="e.g., Okta Production, Entra ID"
+                          value={editingSaml.name}
+                          onChange={e => setEditingSaml({ ...editingSaml, name: e.target.value })}
+                          className="glass-effect text-xs"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">IdP Entity ID *</Label>
+                        <Input
+                          placeholder="e.g., http://www.okta.com/exk12345"
+                          value={editingSaml.idpEntityId}
+                          onChange={e => setEditingSaml({ ...editingSaml, idpEntityId: e.target.value })}
+                          className="glass-effect text-xs font-mono"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">IdP SSO URL (HTTP-Redirect) *</Label>
+                        <Input
+                          placeholder="https://login.okta.com/app/saml2/sso"
+                          value={editingSaml.idpSSOUrl}
+                          onChange={e => setEditingSaml({ ...editingSaml, idpSSOUrl: e.target.value })}
+                          className="glass-effect text-xs font-mono"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">IdP X.509 Certificate (PEM) *</Label>
+                        <textarea
+                          placeholder={"-----BEGIN CERTIFICATE-----\nMIIC...\n-----END CERTIFICATE-----"}
+                          value={editingSaml.idpCertificate}
+                          onChange={e => setEditingSaml({ ...editingSaml, idpCertificate: e.target.value })}
+                          rows={4}
+                          className="w-full px-3 py-2 rounded-lg glass-effect border border-border/40 text-xs font-mono resize-y bg-transparent text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">NameID Format</Label>
+                        <Select
+                          value={editingSaml.nameIdFormat}
+                          onValueChange={(v: SAMLNameIdFormat) => setEditingSaml({ ...editingSaml, nameIdFormat: v })}
+                        >
+                          <SelectTrigger className="glass-effect text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">Email Address</SelectItem>
+                            <SelectItem value="urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified">Unspecified</SelectItem>
+                            <SelectItem value="urn:oasis:names:tc:SAML:2.0:nameid-format:persistent">Persistent</SelectItem>
+                            <SelectItem value="urn:oasis:names:tc:SAML:2.0:nameid-format:transient">Transient</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">SP Entity ID</Label>
+                          <Input
+                            value={editingSaml.entityId}
+                            onChange={e => setEditingSaml({ ...editingSaml, entityId: e.target.value })}
+                            className="glass-effect text-xs font-mono"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">ACS URL</Label>
+                          <Input
+                            value={editingSaml.acsUrl}
+                            onChange={e => setEditingSaml({ ...editingSaml, acsUrl: e.target.value })}
+                            className="glass-effect text-xs font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2">
+                      <Button variant="ghost" size="sm" onClick={closeSamlEditor} className="rounded-full btn-press text-xs">
+                        Cancel
+                      </Button>
+                      <Button onClick={handleSaveSaml} size="sm" className="rounded-full btn-press text-xs">
+                        <Save className="h-3.5 w-3.5 mr-1.5" />Save Connection
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Existing SAML connections */}
+                <div className="space-y-3">
+                  {samlConfigs.length === 0 && !editingSaml && (
+                    <div className="p-6 rounded-xl border border-dashed border-border/40 text-center">
+                      <Globe className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
+                      <p className="text-sm text-muted-foreground">No SAML IdP connections configured</p>
+                      <p className="text-xs text-muted-foreground/60 mt-1">Add an Identity Provider to enable enterprise SSO login</p>
+                    </div>
+                  )}
+
+                  {samlConfigs.map(cfg => (
+                    <div key={cfg.id} className="p-4 rounded-xl border border-border/40 glass-effect shadow-depth-sm space-y-3">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 rounded-xl bg-emerald-500/10 shadow-depth-sm">
+                          <Shield className="h-5 w-5 text-emerald-400 shrink-0" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <h4 className="font-semibold text-sm">{cfg.name}</h4>
+                            <Badge variant="default" className="text-xs">SAML 2.0</Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground font-mono truncate">{cfg.idpEntityId}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Button
+                          variant="ghost" size="sm"
+                          onClick={() => handleDownloadMetadata(cfg)}
+                          className="rounded-full btn-press text-xs h-7"
+                        >
+                          <ExternalLink className="h-3 w-3 mr-1" />Download SP Metadata
+                        </Button>
+                        <Button
+                          variant="ghost" size="sm"
+                          onClick={() => copyMetadataXml(cfg)}
+                          className="rounded-full btn-press text-xs h-7"
+                        >
+                          <Copy className="h-3 w-3 mr-1" />Copy XML
+                        </Button>
+                        <Button
+                          variant="ghost" size="sm"
+                          onClick={() => handleTestSaml(cfg.id)}
+                          disabled={samlTestLoading === cfg.id}
+                          className="rounded-full btn-press text-xs h-7"
+                        >
+                          {samlTestLoading === cfg.id ? (
+                            <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />Testing...</>
+                          ) : (
+                            <><Zap className="h-3 w-3 mr-1" />Test SSO</>
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost" size="sm"
+                          onClick={() => openSamlEditor(cfg)}
+                          className="rounded-full btn-press text-xs h-7"
+                        >
+                          <Settings className="h-3 w-3 mr-1" />Edit
+                        </Button>
+                        <Button
+                          variant="ghost" size="sm"
+                          onClick={() => handleDeleteSaml(cfg.id, cfg.name)}
+                          className="rounded-full btn-press text-xs h-7 text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="h-3 w-3 mr-1" />Delete
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 

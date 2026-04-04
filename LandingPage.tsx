@@ -14,6 +14,11 @@ import {
   isDemoMode,
 } from './lib/ssoConfig';
 import {
+  getSAMLConfigs,
+  initiateSAMLLogin,
+  type SAMLConfig,
+} from './lib/saml';
+import {
   enableDemoMode,
   seedDemoData,
   createDemoSession,
@@ -217,6 +222,19 @@ export default function LandingPage() {
   const [showDemoAccess, setShowDemoAccess] = useState(false);
   const [demoPassphrase, setDemoPassphrase] = useState('');
   const [demoError, setDemoError] = useState('');
+  const [samlConfigs] = useState<SAMLConfig[]>(() => getSAMLConfigs());
+  const [showSSOPicker, setShowSSOPicker] = useState(false);
+  const [ssoSamlLoading, setSsoSamlLoading] = useState<string | null>(null);
+
+  const handleSAMLSSOLogin = async (configId: string) => {
+    setSsoSamlLoading(configId);
+    try {
+      await initiateSAMLLogin(configId);
+    } catch (err) {
+      logError(`[SAML] SSO login failed:`, err);
+      setSsoSamlLoading(null);
+    }
+  };
 
   const handleDemoLogin = () => {
     const ok = enableDemoMode(demoPassphrase);
@@ -546,6 +564,87 @@ export default function LandingPage() {
                       </>
                     )}
                   </button>
+                  {/* SAML SSO — Enterprise Login */}
+                  {samlConfigs.length > 0 && (
+                    <>
+                      {!showSSOPicker ? (
+                        <button
+                          onClick={() => samlConfigs.length === 1 ? handleSAMLSSOLogin(samlConfigs[0].id) : setShowSSOPicker(true)}
+                          disabled={isLoggingIn || ssoLoading !== null || ssoSamlLoading !== null}
+                          style={{
+                            width: '100%', padding: '12px 16px',
+                            background: 'linear-gradient(135deg, rgba(16,185,129,0.08), rgba(52,211,153,0.05))',
+                            border: '1px solid rgba(16,185,129,0.25)',
+                            borderRadius: '14px', color: '#34d399',
+                            fontFamily: 'Space Grotesk, sans-serif', fontSize: '14px',
+                            fontWeight: 500,
+                            cursor: ssoSamlLoading ? 'not-allowed' : 'pointer',
+                            opacity: (ssoLoading || ssoSamlLoading) ? 0.6 : 1,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+                            transition: 'all 0.18s ease',
+                          }}
+                          onMouseEnter={e => { if (!ssoSamlLoading) { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(16,185,129,0.14), rgba(52,211,153,0.1))'; e.currentTarget.style.borderColor = 'rgba(16,185,129,0.4)'; } }}
+                          onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(16,185,129,0.08), rgba(52,211,153,0.05))'; e.currentTarget.style.borderColor = 'rgba(16,185,129,0.25)'; }}
+                        >
+                          {ssoSamlLoading ? (
+                            <div className="aura-dots" style={{ display: 'flex', gap: '4px' }}><span /><span /><span /></div>
+                          ) : (
+                            <>
+                              <Lock size={16} />
+                              Sign in with Enterprise SSO
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <div style={{
+                          padding: '12px', borderRadius: '14px',
+                          background: 'rgba(16,185,129,0.05)', border: '1px solid rgba(16,185,129,0.2)',
+                          display: 'flex', flexDirection: 'column', gap: '8px',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', letterSpacing: '0.12em', color: 'rgba(52,211,153,0.7)', textTransform: 'uppercase' }}>
+                              Select your organization
+                            </span>
+                            <button
+                              onClick={() => setShowSSOPicker(false)}
+                              style={{ background: 'none', border: 'none', color: 'var(--aura-text-tech)', cursor: 'pointer', padding: '2px', fontSize: '16px', lineHeight: 1 }}
+                            >
+                              &times;
+                            </button>
+                          </div>
+                          {samlConfigs.map(cfg => (
+                            <button
+                              key={cfg.id}
+                              onClick={() => handleSAMLSSOLogin(cfg.id)}
+                              disabled={ssoSamlLoading !== null}
+                              style={{
+                                width: '100%', padding: '10px 14px',
+                                background: 'var(--aura-bg-surface-1)',
+                                border: '1px solid rgba(255,255,255,0.08)',
+                                borderRadius: '10px', color: 'var(--aura-text-primary)',
+                                fontFamily: 'Space Grotesk, sans-serif', fontSize: '13px',
+                                fontWeight: 500, textAlign: 'left',
+                                cursor: ssoSamlLoading === cfg.id ? 'not-allowed' : 'pointer',
+                                opacity: ssoSamlLoading && ssoSamlLoading !== cfg.id ? 0.4 : 1,
+                                display: 'flex', alignItems: 'center', gap: '10px',
+                                transition: 'all 0.18s ease',
+                              }}
+                              onMouseEnter={e => { if (!ssoSamlLoading) { e.currentTarget.style.background = 'var(--aura-bg-surface-2)'; e.currentTarget.style.borderColor = 'rgba(16,185,129,0.3)'; } }}
+                              onMouseLeave={e => { e.currentTarget.style.background = 'var(--aura-bg-surface-1)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
+                            >
+                              {ssoSamlLoading === cfg.id ? (
+                                <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                              ) : (
+                                <Lock size={14} style={{ color: '#34d399', opacity: 0.7 }} />
+                              )}
+                              <span>{cfg.name}</span>
+                              <ArrowRight size={12} style={{ marginLeft: 'auto', color: 'var(--aura-text-tech)' }} />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
 
                 {/* SSO / Email divider */}

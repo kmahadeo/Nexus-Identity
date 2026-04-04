@@ -23,6 +23,7 @@ import DirectorySync from './DirectorySync';
 import ProtectedReports from './ProtectedReports';
 import UserManagement from './UserManagement';
 import ServiceAccounts from './ServiceAccounts';
+import AgentIdentity from './AgentIdentity';
 import { toast } from 'sonner';
 import {
   useGetAllUsers, useDeactivateUser, useGetPolicies, useTogglePolicy, useAddPolicy,
@@ -684,6 +685,24 @@ export default function AdminIntelligence() {
         <CardContent>
           <SectionErrorBoundary sectionName="ServiceAccounts">
             <ServiceAccounts />
+          </SectionErrorBoundary>
+        </CardContent>
+      </Card>
+
+      {/* ── AI Agent Identity ─────────────────────────────────────────────── */}
+      <Card id="section-ai-agents" className="border-border/40 glass-strong shadow-depth-md">
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-blue-400/10"><Bot className="h-5 w-5 text-blue-400" /></div>
+            <div>
+              <CardTitle className="text-base">AI Agent Identity</CardTitle>
+              <CardDescription>Manage autonomous AI agent access, capabilities, and approval workflows</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <SectionErrorBoundary sectionName="AgentIdentity">
+            <AgentIdentity />
           </SectionErrorBoundary>
         </CardContent>
       </Card>

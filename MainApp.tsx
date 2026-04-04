@@ -51,6 +51,7 @@ const ADMIN_SUB_ITEMS: AdminSubItem[] = [
   { id: 'admin-sessions',  label: 'Sessions',         sectionId: 'section-sessions' },
   { id: 'admin-users',     label: 'Users',            sectionId: 'section-users' },
   { id: 'admin-service',   label: 'Service Accounts', sectionId: 'section-service-accounts' },
+  { id: 'admin-agents',    label: 'AI Agents',        sectionId: 'section-ai-agents' },
   { id: 'admin-policies',  label: 'Policies',         sectionId: 'section-policies' },
   { id: 'admin-directory', label: 'Directory Sync',   sectionId: 'section-directory-sync' },
   { id: 'admin-hardware',  label: 'Hardware Keys',    sectionId: 'section-hardware-keys' },
