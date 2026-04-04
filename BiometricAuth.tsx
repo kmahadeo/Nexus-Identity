@@ -127,9 +127,10 @@ function EnrollmentModal({
     }, 900);
 
     const session = sessionStorage_.get();
-    const userId = session?.principalId || `user-${Date.now()}`;
-    const username = session?.name || 'nexus-user';
-    const displayName = session?.name || 'Nexus User';
+    if (!session?.principalId) { onCancel(); return; }
+    const userId = session.principalId;
+    const username = session.email || session.name || 'user';
+    const displayName = session.name || session.email?.split('@')[0] || 'User';
 
     registerPasskey(userId, username, displayName, 'platform')
       .then((passkey) => {

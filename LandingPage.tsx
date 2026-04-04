@@ -294,6 +294,21 @@ export default function LandingPage() {
       setEmailError('Please enter a valid email address');
       return;
     }
+    // Block placeholder/test/disposable domains
+    const domain = em.split('@')[1]?.toLowerCase();
+    const blockedDomains = [
+      'test.com', 'example.com', 'fake.com', 'temp.com', 'throwaway.com',
+      'mailinator.com', 'guerrillamail.com', 'sharklasers.com', 'grr.la',
+      'guerrillamailblock.com', 'pokemail.net', 'spam4.me', 'binkmail.com',
+      'tempmail.com', 'yopmail.com', 'trashmail.com', 'maildrop.cc',
+      'dispostable.com', 'getnada.com', '10minutemail.com', 'temp-mail.org',
+      'fakeinbox.com', 'tempail.com', 'emailondeck.com',
+      'nexus.io', // internal test domain
+    ];
+    if (blockedDomains.includes(domain)) {
+      setEmailError('Please use a real email address — test/disposable emails are not accepted');
+      return;
+    }
     setEmailError('');
     loginWithEmail(em, withPasskey);
   };

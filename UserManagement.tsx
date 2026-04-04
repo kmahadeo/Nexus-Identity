@@ -166,8 +166,18 @@ export default function UserManagement() {
       toast.error('First name and email are required');
       return;
     }
-    const name = `${newUser.firstName.trim()} ${newUser.lastName.trim()}`.trim();
     const email = newUser.email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error('Please enter a valid email address');
+      return;
+    }
+    const domain = email.split('@')[1];
+    const blocked = ['test.com','example.com','fake.com','temp.com','mailinator.com','yopmail.com','tempmail.com','nexus.io'];
+    if (blocked.includes(domain)) {
+      toast.error('Please use a real email address');
+      return;
+    }
+    const name = `${newUser.firstName.trim()} ${newUser.lastName.trim()}`.trim();
     const principalId = `nexus-${newUser.role}-${btoa(email).replace(/[^a-z0-9]/gi, '').slice(0, 12)}`;
     const now = Date.now();
 

@@ -43,12 +43,13 @@ export default function PasskeysView() {
   /* ── Register new passkey ── */
   const handleCreate = async (attachment: AuthenticatorAttachment = 'platform') => {
     if (!webAuthnAvail) { toast.error('WebAuthn is not supported in this browser.'); return; }
+    if (!session?.email) { toast.error('You must be signed in to register a passkey.'); return; }
     setIsCreating(true);
     try {
       const stored = await registerPasskey(
-        session?.principalId ?? crypto.randomUUID(),
-        session?.email       ?? 'user@nexus.io',
-        session?.name        ?? 'Nexus User',
+        session.principalId,
+        session.email,
+        session.name || session.email.split('@')[0],
         attachment,
       );
       reload();
