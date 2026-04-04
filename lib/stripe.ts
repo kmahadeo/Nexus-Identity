@@ -1,119 +1,123 @@
 /**
- * lib/stripe.ts — Stripe Checkout integration helpers.
+ * lib/stripe.ts — Stripe billing integration.
  *
- * Provides functions to create Stripe Checkout sessions and manage subscriptions.
- * Uses the publishable key stored via ssoConfig.ts.
+ * Beta mode: VITE_BETA_MODE=true bypasses all payments.
+ * When beta ends, set VITE_BETA_MODE=false to enable real billing.
  *
- * TODO: Replace `pk_test_placeholder` with your actual Stripe publishable key.
- * TODO: Implement backend endpoints for creating Checkout sessions and Customer Portal links.
+ * Beta bypass codes (enter in billing page to get free access):
+ *   - "NEXUS-BETA-2026" — full enterprise access, no charge
+ *   - Admin accounts (kaushik.mahadeokar@gmail.com) auto-bypass
  */
 
 import { getStripeKey } from './ssoConfig';
-import { logWarn, logInfo } from './logger';
 
-/* ── Price IDs ───────────────────────────────────────────────────────────── */
+/* ── Beta Mode ──────────────────────────────────────────────────────────── */
+
+const BETA_BYPASS_CODES = ['NEXUS-BETA-2026', 'NEXUS-FOUNDER', 'NEXUS-DEMO-2026'];
+const BETA_BYPASS_EMAILS = ['kaushik.mahadeokar@gmail.com', 'admin@nexus.io', 'demo@nexus-identity.io'];
+const BETA_KEY = 'nexus-beta-activated';
+
+export function isBetaMode(): boolean {
+  // Check env var first
+  if (import.meta.env.VITE_BETA_MODE === 'true') return true;
+  // Check if user activated beta via code
+  return localStorage.getItem(BETA_KEY) === 'true';
+}
+
+export function activateBeta(code: string): boolean {
+  if (BETA_BYPASS_CODES.includes(code.toUpperCase().trim())) {
+    localStorage.setItem(BETA_KEY, 'true');
+    return true;
+  }
+  return false;
+}
+
+export function isBetaEmail(email: string): boolean {
+  return BETA_BYPASS_EMAILS.includes(email.toLowerCase().trim());
+}
+
+/* ── Stripe Key ─────────────────────────────────────────────────────────── */
+
+function getKey(): string {
+  // Env var takes priority
+  const envKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
+  if (envKey) return envKey;
+  // Fall back to Settings config
+  return getStripeKey();
+}
+
+export function isStripeConfigured(): boolean {
+  const key = getKey();
+  return !!key && !key.includes('placeholder');
+}
+
+/* ── Price IDs ──────────────────────────────────────────────────────────── */
 
 /**
- * Returns Stripe Price IDs for each plan.
- *
- * TODO: Replace these placeholder IDs with real Stripe Price IDs from your dashboard.
+ * Stripe Price IDs for each plan.
+ * Create these in Stripe Dashboard → Products → Add Product → Add Price.
+ * Then replace the placeholder values below.
  */
 export function getStripePrices(): Record<string, { monthly: string; annual: string }> {
   return {
     individual: {
-      monthly: 'price_individual_monthly_placeholder', // TODO: Replace with real Stripe Price ID
-      annual: 'price_individual_annual_placeholder',   // TODO: Replace with real Stripe Price ID
+      monthly: 'price_individual_monthly', // TODO: Replace after creating in Stripe
+      annual: 'price_individual_annual',
     },
     teams: {
-      monthly: 'price_teams_monthly_placeholder',      // TODO: Replace with real Stripe Price ID
-      annual: 'price_teams_annual_placeholder',        // TODO: Replace with real Stripe Price ID
+      monthly: 'price_teams_monthly',
+      annual: 'price_teams_annual',
     },
     business: {
-      monthly: 'price_business_monthly_placeholder',   // TODO: Replace with real Stripe Price ID
-      annual: 'price_business_annual_placeholder',     // TODO: Replace with real Stripe Price ID
+      monthly: 'price_business_monthly',
+      annual: 'price_business_annual',
     },
   };
 }
 
-/* ── Checkout ────────────────────────────────────────────────────────────── */
+/* ── Checkout ───────────────────────────────────────────────────────────── */
 
-/**
- * Create a Stripe Checkout session and redirect the user.
- *
- * In production, this should call your backend which creates a Checkout Session
- * using the Stripe secret key and returns the session URL.
- *
- * TODO: Implement backend endpoint POST /api/billing/checkout
- */
 export async function initStripeCheckout(
   priceId: string,
   successUrl: string,
-  cancelUrl: string,
+  _cancelUrl: string,
 ): Promise<void> {
-  const publishableKey = getStripeKey();
-
-  if (!publishableKey || publishableKey === 'pk_test_placeholder') {
-    // DEMO mode — simulate checkout
-    return simulateCheckout(successUrl);
-  }
-
-  // TODO: Call your backend to create a Checkout Session:
-  // const res = await fetch('/api/billing/checkout', {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify({ priceId, successUrl, cancelUrl }),
-  // });
-  // const { url } = await res.json();
-  // window.location.href = url;
-
-  // Fallback: Use Stripe.js to redirect (requires @stripe/stripe-js)
-  // const stripe = await loadStripe(publishableKey);
-  // await stripe?.redirectToCheckout({ lineItems: [{ price: priceId, quantity: 1 }], mode: 'subscription', successUrl, cancelUrl });
-
-  logWarn('[Stripe] Backend checkout endpoint not implemented — falling back to simulation');
-  return simulateCheckout(successUrl);
-}
-
-/* ── Customer Portal ─────────────────────────────────────────────────────── */
-
-/**
- * Redirect user to Stripe Customer Portal for subscription management.
- *
- * TODO: Implement backend endpoint POST /api/billing/portal that creates
- * a Billing Portal session and returns the URL.
- */
-export async function openCustomerPortal(): Promise<void> {
-  const publishableKey = getStripeKey();
-
-  if (!publishableKey || publishableKey === 'pk_test_placeholder') {
-    logWarn('[Stripe] No Stripe key configured — customer portal unavailable');
+  // Beta mode — simulate success, no charge
+  if (isBetaMode()) {
+    console.log('[Stripe] Beta mode — checkout bypassed, no charge');
+    await new Promise(r => setTimeout(r, 800));
     return;
   }
 
-  // TODO: Call your backend:
-  // const res = await fetch('/api/billing/portal', { method: 'POST' });
-  // const { url } = await res.json();
-  // window.location.href = url;
+  // Check if user's email is in bypass list
+  try {
+    const session = JSON.parse(localStorage.getItem('nexus-session') ?? 'null');
+    if (session?.email && isBetaEmail(session.email)) {
+      console.log('[Stripe] Founder/admin bypass — no charge');
+      await new Promise(r => setTimeout(r, 800));
+      return;
+    }
+  } catch {}
 
-  logWarn('[Stripe] Backend portal endpoint not implemented');
+  // Real Stripe checkout would happen here via backend
+  // For now, Stripe Checkout requires a server-side session creation
+  // TODO: Create Cloudflare Worker at /api/billing/checkout
+  console.log('[Stripe] Would charge for price:', priceId);
+  await new Promise(r => setTimeout(r, 800));
 }
 
-/* ── Helpers ─────────────────────────────────────────────────────────────── */
+/* ── Customer Portal ────────────────────────────────────────────────────── */
 
-/** Check whether Stripe is configured with a real key. */
-export function isStripeConfigured(): boolean {
-  const key = getStripeKey();
-  return !!key && key !== 'pk_test_placeholder';
+export async function openCustomerPortal(): Promise<void> {
+  if (isBetaMode()) {
+    console.log('[Stripe] Beta mode — portal not available');
+    return;
+  }
+  // TODO: Backend endpoint for Stripe Customer Portal
+  console.log('[Stripe] Customer portal requires backend endpoint');
 }
 
-/** Simulate a checkout redirect with a short delay (demo mode). */
-async function simulateCheckout(successUrl: string): Promise<void> {
-  await new Promise(r => setTimeout(r, 1200));
-  // In demo mode, just mark as success
-  logInfo('[Stripe] Demo checkout complete — would redirect to:', successUrl);
-}
-
-/* ── Mock Invoice Data ───────────────────────────────────────────────────── */
+/* ── Invoice Data ───────────────────────────────────────────────────────── */
 
 export interface InvoiceItem {
   id: string;
@@ -121,40 +125,22 @@ export interface InvoiceItem {
   amount: string;
   status: 'paid' | 'pending' | 'failed';
   description: string;
-  pdfUrl?: string;
 }
 
-/** Returns mock invoice history for the billing page. */
 export function getMockInvoices(): InvoiceItem[] {
+  if (isBetaMode()) {
+    return [{
+      id: 'inv_beta',
+      date: new Date().toLocaleDateString(),
+      amount: '$0.00',
+      status: 'paid',
+      description: 'Beta Access — No Charge',
+    }];
+  }
+
   const now = Date.now();
   return [
-    {
-      id: 'inv_demo_001',
-      date: new Date(now - 5 * 24 * 60 * 60 * 1000).toLocaleDateString(),
-      amount: '$25.00',
-      status: 'paid',
-      description: 'Teams Plan — Monthly',
-    },
-    {
-      id: 'inv_demo_002',
-      date: new Date(now - 35 * 24 * 60 * 60 * 1000).toLocaleDateString(),
-      amount: '$25.00',
-      status: 'paid',
-      description: 'Teams Plan — Monthly',
-    },
-    {
-      id: 'inv_demo_003',
-      date: new Date(now - 65 * 24 * 60 * 60 * 1000).toLocaleDateString(),
-      amount: '$8.00',
-      status: 'paid',
-      description: 'Individual Plan — Monthly',
-    },
-    {
-      id: 'inv_demo_004',
-      date: new Date(now - 95 * 24 * 60 * 60 * 1000).toLocaleDateString(),
-      amount: '$8.00',
-      status: 'paid',
-      description: 'Individual Plan — Monthly',
-    },
+    { id: 'inv_001', date: new Date(now - 5 * 86400000).toLocaleDateString(), amount: '$25.00', status: 'paid', description: 'Teams Plan — Monthly' },
+    { id: 'inv_002', date: new Date(now - 35 * 86400000).toLocaleDateString(), amount: '$25.00', status: 'paid', description: 'Teams Plan — Monthly' },
   ];
 }

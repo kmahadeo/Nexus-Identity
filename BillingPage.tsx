@@ -18,8 +18,10 @@ import {
   FileText, Receipt, Settings2, AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { initStripeCheckout, openCustomerPortal, isStripeConfigured, getStripePrices, getMockInvoices, type InvoiceItem } from './lib/stripe';
+import { initStripeCheckout, openCustomerPortal, isStripeConfigured, getStripePrices, getMockInvoices, isBetaMode, activateBeta, isBetaEmail, type InvoiceItem } from './lib/stripe';
 import { isDemoMode as isDemoModeActive } from './lib/demoMode';
+import { Input } from '@/components/ui/input';
+import { sessionStorage_ } from './lib/storage';
 
 const PLANS = [
   {
@@ -172,6 +174,11 @@ export default function BillingPage() {
   const { tier } = useTenant();
   const [billing, setBillingState] = useState(getBilling);
   const [annual, setAnnual] = useState(billing.billingCycle === 'annual');
+  const [betaCode, setBetaCode] = useState('');
+  const [betaActive, setBetaActive] = useState(() => {
+    const session = sessionStorage_.get();
+    return isBetaMode() || (session?.email ? isBetaEmail(session.email) : false);
+  });
   const [upgrading, setUpgrading] = useState<string | null>(null);
 
   const currentPlan = PLANS.find(p => p.id === billing.planId) ?? PLANS[0];
@@ -241,6 +248,57 @@ export default function BillingPage() {
         <h1 className="text-3xl font-bold mb-2">Plans & Billing</h1>
         <p className="text-muted-foreground">Choose the plan that fits your security needs</p>
       </div>
+
+      {/* Beta access banner */}
+      {betaActive && (
+        <Card className="border-emerald-500/30 bg-emerald-500/5 shadow-depth-md">
+          <CardContent className="p-5">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-emerald-500/15">
+                <Sparkles className="h-5 w-5 text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-emerald-300">Beta Access Active</p>
+                <p className="text-xs text-emerald-400/60">All features are unlocked at no charge during the beta period.</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!betaActive && !inDemo && (
+        <div className="p-4 rounded-xl border border-border/40 glass-effect">
+          <div className="flex items-center gap-3">
+            <Input
+              placeholder="Enter beta access code"
+              value={betaCode}
+              onChange={(e) => setBetaCode(e.target.value)}
+              className="glass-effect text-sm flex-1 max-w-[250px]"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (activateBeta(betaCode)) {
+                    setBetaActive(true);
+                    toast.success('Beta access activated — all features unlocked');
+                  } else {
+                    toast.error('Invalid beta code');
+                  }
+                }
+              }}
+            />
+            <Button size="sm" variant="outline" className="rounded-full btn-press text-xs" onClick={() => {
+              if (activateBeta(betaCode)) {
+                setBetaActive(true);
+                toast.success('Beta access activated — all features unlocked');
+              } else {
+                toast.error('Invalid beta code');
+              }
+            }}>
+              Activate
+            </Button>
+            <p className="text-xs text-white/30">Have a beta code? Enter it for free access.</p>
+          </div>
+        </div>
+      )}
 
       {/* Demo mode billing notice */}
       {inDemo && (
