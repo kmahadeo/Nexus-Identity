@@ -907,7 +907,7 @@ export default function AdminIntelligence() {
               <Input placeholder="What this policy enforces" className="glass-effect"
                 value={newPolicy.description ?? ''} onChange={e => setNewPolicy(p => ({ ...p, description: e.target.value }))} />
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3">
               <div className="space-y-1.5">
                 <Label>Type</Label>
                 <Select value={newPolicy.type} onValueChange={v => setNewPolicy(p => ({ ...p, type: v as SecurityPolicy['type'] }))}>

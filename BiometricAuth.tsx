@@ -885,7 +885,7 @@ export default function BiometricAuth() {
                 </Badge>
               )}
             </div>
-            <div className="grid grid-cols-3 gap-3 text-center text-xs">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3 text-center text-xs">
               {[
                 { label: 'Camera Feed', status: 'ready' },
                 { label: 'Motion Analysis', status: 'ready' },

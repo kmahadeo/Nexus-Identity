@@ -348,7 +348,7 @@ export default function AISecurityCoach() {
               <span className="text-sm text-muted-foreground mb-1">/ 100</span>
             </div>
             <Progress value={localAnalysis.score} className="h-2 mt-3" />
-            <div className="grid grid-cols-3 gap-2 mt-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-3">
               {[
                 { label: 'Weak Passwords', value: localAnalysis.stats.weakPasswords },
                 { label: 'Stale Creds', value: localAnalysis.stats.staleCredentials },

@@ -717,7 +717,7 @@ export default function DirectorySync() {
   return (
     <div className="space-y-4">
       {/* Stats Row */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
         {[
           { label: 'Directories', value: connections.length, sub: `${connections.filter(c => c.status === 'connected').length} connected`, icon: FolderSync },
           { label: 'Users Synced', value: totalSynced, sub: 'across all dirs', icon: Users },

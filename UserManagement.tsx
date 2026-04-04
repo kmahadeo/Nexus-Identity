@@ -220,7 +220,7 @@ export default function UserManagement() {
   return (
     <div className="space-y-5">
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
         {[
           { label: 'Total Users', value: totalUsers, icon: Users, color: 'text-primary' },
           { label: 'Active', value: activeUsers, icon: CheckCircle2, color: 'text-emerald-400' },

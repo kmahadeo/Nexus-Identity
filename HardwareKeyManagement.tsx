@@ -354,7 +354,7 @@ export default function HardwareKeyManagement() {
   return (
     <div className="space-y-4">
       {/* Stats row */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3">
         <div className="p-4 rounded-xl glass-effect border border-border/40 text-center">
           <Key className="h-5 w-5 mx-auto mb-2 text-violet-400" />
           <p className="text-2xl font-bold">{keys.length}</p>

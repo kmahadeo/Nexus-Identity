@@ -148,8 +148,8 @@ export default function VoiceMode({ context }: VoiceModeProps) {
       ref={containerRef}
       className="fixed z-50 transition-all duration-300"
       style={{
-        bottom: '24px',
-        right: '24px',
+        bottom: '20px',
+        right: '16px',
       }}
     >
       {/* Expanded panel */}
