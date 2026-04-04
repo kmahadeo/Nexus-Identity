@@ -277,12 +277,12 @@ export default function VaultView() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Enterprise Vault</h1>
+          <h1 className="text-2xl md:text-3xl font-bold mb-2 truncate">Enterprise Vault</h1>
           <p className="text-muted-foreground">Military-grade encryption with real-time AI auditing and security insights</p>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 btn-press card-tactile">
+            <Button className="rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 btn-press card-tactile w-full md:w-auto">
               <Plus className="h-4 w-4 mr-2" />
               Add Entry
             </Button>
@@ -420,48 +420,48 @@ export default function VaultView() {
       </div>
 
       {/* Vault Stats */}
-      <div className="grid md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
         <Card className="border-border/40 glass-strong shadow-depth-md card-tactile gradient-primary">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-3">
-              <Lock className="h-7 w-7 text-primary" />
+          <CardContent className="p-3 md:p-6">
+            <div className="flex items-center justify-between mb-2 md:mb-3">
+              <Lock className="h-5 w-5 md:h-7 md:w-7 text-primary" />
               <Badge variant="secondary" className="text-xs">Total</Badge>
             </div>
-            <div className="text-3xl font-bold mb-1">{totalEntries}</div>
-            <div className="text-sm text-muted-foreground">Vault Entries</div>
+            <div className="text-2xl md:text-3xl font-bold mb-1">{totalEntries}</div>
+            <div className="text-xs md:text-sm text-muted-foreground truncate">Vault Entries</div>
           </CardContent>
         </Card>
 
         <Card className="border-border/40 glass-strong shadow-depth-md card-tactile gradient-success">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-3">
-              <CheckCircle2 className="h-7 w-7 text-success" />
+          <CardContent className="p-3 md:p-6">
+            <div className="flex items-center justify-between mb-2 md:mb-3">
+              <CheckCircle2 className="h-5 w-5 md:h-7 md:w-7 text-success" />
               <Badge variant="secondary" className="text-xs">Secure</Badge>
             </div>
-            <div className="text-3xl font-bold mb-1">{secureEntries}</div>
-            <div className="text-sm text-muted-foreground">Strong Encryption</div>
+            <div className="text-2xl md:text-3xl font-bold mb-1">{secureEntries}</div>
+            <div className="text-xs md:text-sm text-muted-foreground truncate">Strong Encryption</div>
           </CardContent>
         </Card>
 
         <Card className="border-border/40 glass-strong shadow-depth-md card-tactile gradient-warning">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-3">
-              <RefreshCw className="h-7 w-7 text-warning" />
+          <CardContent className="p-3 md:p-6">
+            <div className="flex items-center justify-between mb-2 md:mb-3">
+              <RefreshCw className="h-5 w-5 md:h-7 md:w-7 text-warning" />
               <Badge variant="secondary" className="text-xs">Action</Badge>
             </div>
-            <div className="text-3xl font-bold mb-1">{needsRotationCount}</div>
-            <div className="text-sm text-muted-foreground">Needs Rotation</div>
+            <div className="text-2xl md:text-3xl font-bold mb-1">{needsRotationCount}</div>
+            <div className="text-xs md:text-sm text-muted-foreground truncate">Needs Rotation</div>
           </CardContent>
         </Card>
 
         <Card className="border-border/40 glass-strong shadow-depth-md card-tactile from-accent/15 to-accent/5">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-3">
-              <Cloud className="h-7 w-7 text-accent" />
+          <CardContent className="p-3 md:p-6">
+            <div className="flex items-center justify-between mb-2 md:mb-3">
+              <Cloud className="h-5 w-5 md:h-7 md:w-7 text-accent" />
               <Badge variant="secondary" className="text-xs">Synced</Badge>
             </div>
-            <div className="text-3xl font-bold mb-1">3</div>
-            <div className="text-sm text-muted-foreground">Devices</div>
+            <div className="text-2xl md:text-3xl font-bold mb-1">3</div>
+            <div className="text-xs md:text-sm text-muted-foreground truncate">Devices</div>
           </CardContent>
         </Card>
       </div>

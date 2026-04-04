@@ -366,7 +366,7 @@ export default function AdminIntelligence() {
       </div>
 
       {/* Metrics */}
-      <div className="grid md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
         {[
           { icon: Users, label: 'Registered Users', value: allUsers.length, sub: `${activeUsers} active`, gradient: 'gradient-primary' },
           { icon: Monitor, label: 'Active Sessions', value: activeSessions.length, sub: 'live now', gradient: 'from-blue-500/15 to-blue-500/5' },
@@ -375,10 +375,10 @@ export default function AdminIntelligence() {
           { icon: CheckCircle2, label: 'Compliance Score', value: `${complianceScore}%`, sub: `${activePolicies}/${policies.length} policies`, gradient: 'from-accent/15 to-accent/5' },
         ].map(({ icon: Icon, label, value, sub, gradient }) => (
           <Card key={label} className={`border-border/40 glass-strong shadow-depth-md card-tactile ${gradient}`}>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between mb-3"><Icon className="h-7 w-7" /><Badge variant="secondary" className="text-xs">{sub}</Badge></div>
-              <div className="text-3xl font-bold mb-1">{value}</div>
-              <div className="text-sm text-muted-foreground">{label}</div>
+            <CardContent className="p-3 md:p-6">
+              <div className="flex items-center justify-between mb-2 md:mb-3"><Icon className="h-5 w-5 md:h-7 md:w-7" /><Badge variant="secondary" className="text-xs">{sub}</Badge></div>
+              <div className="text-2xl md:text-3xl font-bold mb-1">{value}</div>
+              <div className="text-xs md:text-sm text-muted-foreground truncate">{label}</div>
             </CardContent>
           </Card>
         ))}

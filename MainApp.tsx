@@ -35,6 +35,8 @@ import OnboardingFlow, { isOnboardingDone } from './OnboardingFlow';
 import HelpRequestDialog from './HelpRequestDialog';
 import BillingPage from './BillingPage';
 import CustomDashboard from './CustomDashboard';
+import VoiceMode from './VoiceMode';
+import { isSpeechSupported } from './lib/voiceMode';
 
 type NavItem =
   | 'dashboard' | 'myview' | 'passkeys' | 'vault' | 'biometric' | 'threat'
@@ -223,6 +225,16 @@ export default function MainApp() {
     setExpandedNav(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
+  // Prevent background scroll when mobile sidebar is open
+  useEffect(() => {
+    if (mobileSidebarOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [mobileSidebarOpen]);
+
   // Show onboarding automatically for new users (not guests)
   useEffect(() => {
     if (role !== 'guest' && !isOnboardingDone()) {
@@ -284,16 +296,16 @@ export default function MainApp() {
       </div>
 
       {/* ── Mobile sidebar backdrop ── */}
-      {mobileSidebarOpen && (
-        <div
-          className="fixed inset-0 z-20 bg-black/60 md:hidden"
-          onClick={() => setMobileSidebarOpen(false)}
-        />
-      )}
+      <div
+        className={`fixed inset-0 z-20 bg-black/60 md:hidden transition-opacity duration-300 ${
+          mobileSidebarOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
+        onClick={() => setMobileSidebarOpen(false)}
+      />
 
       {/* ── Sidebar ── */}
       <aside
-        className={`fixed inset-y-0 left-0 z-30 flex flex-col aurora-panel-strong transition-all duration-300 transform ${
+        className={`fixed inset-y-0 left-0 z-30 flex flex-col aurora-panel-strong transition-transform duration-300 ease-in-out md:transition-[width] ${
           mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
         } md:translate-x-0 md:relative md:flex ${
           sidebarCollapsed ? 'w-[68px]' : 'w-[220px]'
@@ -301,12 +313,12 @@ export default function MainApp() {
         style={{ borderRight: '1px solid rgba(255,255,255,0.06)' }}
       >
         {/* Logo */}
-        <div className="flex items-center gap-2.5 px-4 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-          <NexusLogo size={32} />
+        <div className="flex items-center gap-2 px-3 py-2.5 md:gap-2.5 md:px-4 md:py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <NexusLogo size={28} className="md:w-8 md:h-8" />
           {!sidebarCollapsed && (
             <div className="min-w-0">
               <p className="text-sm font-semibold text-white/90 truncate leading-tight">Nexus</p>
-              <p className="text-[10px] text-white/35 uppercase tracking-[0.15em] font-mono">{config.label}</p>
+              <p className="text-[10px] text-white/35 uppercase tracking-[0.15em] font-mono hidden md:block">{config.label}</p>
             </div>
           )}
         </div>
@@ -359,8 +371,8 @@ export default function MainApp() {
                     if (hasSubmenu) toggleNavExpand(item.id);
                     if (!hasSubmenu) setMobileSidebarOpen(false);
                   }}
-                  className={`w-full flex items-center gap-2.5 rounded-pill text-sm font-medium transition-all btn-press ${
-                    sidebarCollapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2'
+                  className={`w-full flex items-center gap-2.5 rounded-pill text-sm font-medium transition-all btn-press min-h-[44px] md:min-h-0 ${
+                    sidebarCollapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2.5 md:py-2'
                   } ${
                     isActive
                       ? `text-white ${accent.glow}`
@@ -501,14 +513,15 @@ export default function MainApp() {
           <div className="flex items-center gap-1.5">
             {isDemoModeActive() && (
               <Badge
-                className="text-[10px] px-2.5 py-0.5 font-mono tracking-wider animate-pulse"
+                className="text-xs px-3 py-1 font-mono tracking-wider animate-pulse font-bold"
                 style={{
-                  background: 'rgba(167,139,250,0.15)',
-                  color: '#a78bfa',
-                  border: '1px solid rgba(167,139,250,0.35)',
+                  background: 'rgba(167,139,250,0.20)',
+                  color: '#c4b5fd',
+                  border: '1px solid rgba(167,139,250,0.50)',
+                  boxShadow: '0 0 12px rgba(167,139,250,0.25)',
                 }}
               >
-                DEMO
+                DEMO MODE
               </Badge>
             )}
             <Button
@@ -622,6 +635,18 @@ export default function MainApp() {
       )}
 
       {helpOpen && <HelpRequestDialog onClose={() => setHelpOpen(false)} />}
+
+      {/* Voice Mode — floating mic, only if browser supports Speech Recognition */}
+      {isSpeechSupported() && (
+        <VoiceMode
+          context={{
+            principalId: session?.principalId ?? '',
+            email: userProfile?.email ?? '',
+            role,
+            navigate: (view: string) => setActiveView(view as NavItem),
+          }}
+        />
+      )}
     </div>
   );
 }

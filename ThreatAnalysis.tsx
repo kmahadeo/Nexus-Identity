@@ -189,7 +189,7 @@ export default function ThreatAnalysis() {
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Threat Analysis</h1>
+          <h1 className="text-2xl md:text-3xl font-bold mb-2 truncate">Threat Analysis</h1>
           <p className="text-muted-foreground">AI-powered security monitoring with real-time threat detection</p>
         </div>
         <div className="flex items-center gap-3">

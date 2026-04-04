@@ -188,8 +188,8 @@ export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: 
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Welcome Section */}
-      <div className="rounded-2xl p-6 border border-border/40" style={{ background: getWelcomeGradient(securityScore) }}>
-        <h1 className="text-3xl font-bold mb-2">Welcome back!</h1>
+      <div className="rounded-2xl p-4 md:p-6 border border-border/40" style={{ background: getWelcomeGradient(securityScore) }}>
+        <h1 className="text-2xl md:text-3xl font-bold mb-2">Welcome back!</h1>
         <p className={`${getWelcomeTextColor(securityScore)} font-medium`}>
           Your digital identity is <span className="font-bold">{securityScore}%</span> secure
           {securityScore < 60 && ' — immediate action recommended'}
@@ -199,7 +199,7 @@ export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: 
       </div>
 
       {/* Security Metrics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
         <MetricCard
           icon={Shield}
           label="Secure Accounts"
@@ -256,7 +256,7 @@ export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: 
         </CardHeader>
         <CardContent className="relative">
           <Progress value={securityScore} className="h-3 mb-6" />
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
             <StatItem label="Secure Accounts" value={secureAccounts.toString()} />
             <StatItem label="Total Accounts" value={totalAccounts.toString()} />
             <StatItem label="Passkeys" value={passkeysActive.toString()} />
@@ -417,7 +417,7 @@ export default function SecurityDashboard({ onNavigate }: { onNavigate?: (view: 
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
             {dynamicActions.map((action) => (
               <QuickAction
                 key={action.label}
@@ -447,17 +447,17 @@ function MetricCard({ icon: Icon, label, value, total, color }: any) {
 
   return (
     <Card className={`border-border/40 glass-strong shadow-depth-md card-tactile ${colorClasses[color]}`}>
-      <CardContent className="p-6">
-        <div className="flex items-center justify-between mb-3">
-          <Icon className="h-6 w-6" />
+      <CardContent className="p-3 md:p-6">
+        <div className="flex items-center justify-between mb-2 md:mb-3">
+          <Icon className="h-5 w-5 md:h-6 md:w-6" />
           {total && (
             <Badge variant="secondary" className="text-xs">
               {value}/{total}
             </Badge>
           )}
         </div>
-        <div className="text-3xl font-bold mb-1">{value}</div>
-        <div className="text-sm opacity-90">{label}</div>
+        <div className="text-2xl md:text-3xl font-bold mb-1">{value}</div>
+        <div className="text-xs md:text-sm opacity-90 truncate">{label}</div>
       </CardContent>
     </Card>
   );
@@ -539,7 +539,7 @@ function QuickAction({ label, description, gradient, borderClass, icon: Icon, on
   return (
     <button
       onClick={onClick}
-      className={`relative p-5 rounded-xl glass-strong border ${borderClass || 'border-border/40'} shadow-depth-sm card-tactile text-left btn-press group transition-all hover:shadow-depth-md`}
+      className={`relative p-3 md:p-5 rounded-xl glass-strong border ${borderClass || 'border-border/40'} shadow-depth-sm card-tactile text-left btn-press group transition-all hover:shadow-depth-md w-full`}
     >
       <div className="flex items-center justify-between mb-3">
         <div className="p-2.5 rounded-xl glass-effect shadow-depth-sm">
